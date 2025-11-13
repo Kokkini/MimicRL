@@ -14,6 +14,10 @@ import { PolicyManager } from '../utils/PolicyManager.js';
 import { PolicyController } from '../controllers/PolicyController.js';
 import { PlayerController } from '../controllers/PlayerController.js';
 import { NetworkUtils } from '../utils/NetworkUtils.js';
+import { BehaviorCloningTrainer, BCTrainingStats } from '../bc/BehaviorCloningTrainer.js';
+import { DemonstrationStorage } from '../bc/DemonstrationStorage.js';
+import { DemonstrationEpisode, DemonstrationDataset } from '../bc/Demonstration.js';
+import { ActionSpace } from '../core/GameCore.js';
 
 export interface TrainingSessionOptions {
   trainablePlayers?: number[];
@@ -27,6 +31,17 @@ export interface TrainingSessionOptions {
     policyHiddenLayers?: number[];
     valueHiddenLayers?: number[];
     activation?: string;
+  };
+  // Behavior Cloning options
+  enableBehaviorCloning?: boolean;
+  demonstrationStorageKey?: string;
+  behaviorCloningConfig?: {
+    learningRate?: number;
+    batchSize?: number;
+    epochs?: number;
+    lossType?: 'mse' | 'crossentropy' | 'mixed';
+    weightDecay?: number;
+    validationSplit?: number;
   };
   [key: string]: any;
 }
@@ -152,7 +167,32 @@ export class TrainingSession {
     // Policy manager for sampling policies for non-trainable players
     this.policyManager = new PolicyManager();
     this.policyManager.setGameCore(gameCore);
+
+    // Behavior Cloning components
+    this.behaviorCloningTrainer = null;
+    this.demonstrationStorage = new DemonstrationStorage({
+      storageKey: options.demonstrationStorageKey || 'mimicrl_demonstrations'
+    });
+    this.savedDemonstrationKeys = [];
+
+    // Initialize BC trainer if BC is enabled
+    if (options.enableBehaviorCloning) {
+      this.behaviorCloningTrainer = new BehaviorCloningTrainer(
+        options.behaviorCloningConfig || {
+          learningRate: 0.001,
+          batchSize: 32,
+          epochs: 10,
+          lossType: 'mixed',
+          validationSplit: 0.2
+        }
+      );
+    }
   }
+
+  // Behavior Cloning components
+  public behaviorCloningTrainer: BehaviorCloningTrainer | null;
+  public readonly demonstrationStorage: DemonstrationStorage;
+  public savedDemonstrationKeys: string[];
 
   /**
    * Initialize training session
@@ -935,6 +975,119 @@ export class TrainingSession {
     }
 
     console.log('Agent weights imported successfully');
+  }
+
+  /**
+   * Train using behavior cloning on saved demonstrations
+   * @param {string[]} datasetKeys - Keys/paths to demonstration datasets
+   * @param {Function} onProgress - Progress callback (epoch, loss, valLoss) => void
+   * @returns {Promise<BCTrainingStats>} Final training statistics
+   */
+  async trainBehaviorCloning(
+    datasetKeys: string[],
+    onProgress?: (epoch: number, loss: number, valLoss?: number) => void
+  ): Promise<BCTrainingStats> {
+    if (!this.behaviorCloningTrainer) {
+      throw new Error('Behavior cloning not enabled. Set enableBehaviorCloning: true in options.');
+    }
+
+    if (datasetKeys.length === 0) {
+      throw new Error('No demonstration datasets provided');
+    }
+
+    // Load all datasets
+    const datasets: DemonstrationDataset[] = [];
+    for (const key of datasetKeys) {
+      try {
+        const dataset = await this.demonstrationStorage.loadDataset(key);
+        datasets.push(dataset);
+      } catch (error) {
+        console.error(`Failed to load dataset ${key}:`, error);
+        throw error;
+      }
+    }
+
+    // Merge datasets
+    const mergedDataset = this.mergeDatasets(datasets);
+
+    // Get policy agent for the trainable player
+    const policyAgent = this.policyAgents[this.trainablePlayers[0]] || this.policyAgent;
+    if (!policyAgent) {
+      throw new Error('No policy agent available for training');
+    }
+
+    // Train
+    const stats = await this.behaviorCloningTrainer.train(
+      mergedDataset,
+      policyAgent,
+      onProgress
+    );
+
+    return stats;
+  }
+
+  /**
+   * Save demonstration episode to disk
+   * @param {DemonstrationEpisode} episode - Episode to save
+   * @returns {Promise<string>} Key/path to saved dataset
+   */
+  async saveDemonstrationEpisode(
+    episode: DemonstrationEpisode
+  ): Promise<string> {
+    // Create dataset from single episode
+    const dataset = this.demonstrationStorage.createDataset(
+      [episode],
+      {
+        observationSize: this.gameCore.getObservationSize(),
+        actionSize: this.gameCore.getActionSize(),
+        actionSpaces: this.gameCore.getActionSpaces()
+      }
+    );
+
+    // Save to disk
+    const key = await this.demonstrationStorage.saveDataset(dataset);
+    this.savedDemonstrationKeys.push(key);
+    return key;
+  }
+
+  /**
+   * List all saved demonstration datasets
+   * @returns {Promise<string[]>} Array of dataset keys
+   */
+  async listDemonstrationDatasets(): Promise<string[]> {
+    return await this.demonstrationStorage.listDatasets();
+  }
+
+  /**
+   * Delete a demonstration dataset
+   * @param {string} key - Key/path to dataset
+   */
+  async deleteDemonstrationDataset(key: string): Promise<void> {
+    await this.demonstrationStorage.deleteDataset(key);
+    this.savedDemonstrationKeys = this.savedDemonstrationKeys.filter(k => k !== key);
+  }
+
+  /**
+   * Merge multiple datasets into one
+   */
+  private mergeDatasets(datasets: DemonstrationDataset[]): DemonstrationDataset {
+    const allEpisodes: DemonstrationEpisode[] = [];
+    let totalSteps = 0;
+
+    for (const dataset of datasets) {
+      allEpisodes.push(...dataset.episodes);
+      totalSteps += dataset.metadata.totalSteps;
+    }
+
+    return {
+      episodes: allEpisodes,
+      metadata: {
+        totalSteps,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        gameCoreInfo: datasets[0]?.metadata.gameCoreInfo
+      }
+    };
   }
 
   /**

@@ -22,6 +22,15 @@ export class TrainingUI {
     // Training session reference
     this.trainingSession = null;
     
+    // GameLoop reference for BC
+    this.gameLoop = null;
+    
+    // BC UI elements
+    this.bcStatus = null;
+    this.bcTrainingProgress = null;
+    this.bcDemonstrationsList = null;
+    this.savedDemonstrationKeys = [];
+    
     // Chart instances
     this.chart = null;
     this.gameLengthChart = null;
@@ -349,6 +358,23 @@ export class TrainingUI {
           </div>
         </div>
 
+        <div class="behavior-cloning-config" style="margin:16px 0; border:1px solid #444; padding:12px; border-radius:4px;">
+          <h3>Behavior Cloning</h3>
+          <div style="margin-bottom:8px;">
+            <button id="record-demonstration-button" class="control-button">Record Demonstration</button>
+            <button id="clone-behavior-button" class="control-button" style="margin-left:8px;">Clone Behavior</button>
+          </div>
+          <div id="bc-status" style="font-size:12px; color:#aaa; margin-bottom:8px;">
+            Status: Not recording
+          </div>
+          <div id="bc-training-progress" style="display:none; font-size:12px; color:#4a9eff; margin-bottom:8px;">
+            Training...
+          </div>
+          <div id="bc-demonstrations-list" style="font-size:12px; color:#aaa;">
+            Saved demonstrations: 0
+          </div>
+        </div>
+
         <div class="training-params" style="margin:16px 0; border:1px solid #444; padding:12px; border-radius:4px;">
           <h3>Training Parameters</h3>
           <details>
@@ -565,6 +591,12 @@ export class TrainingUI {
     this.oppListContainer = document.getElementById('opp-options-list');
     this.oppUploadInput = document.getElementById('opp-upload-input');
     this.renderOpponentOptions();
+
+    // BC UI refs
+    this.bcStatus = document.getElementById('bc-status');
+    this.bcTrainingProgress = document.getElementById('bc-training-progress');
+    this.bcDemonstrationsList = document.getElementById('bc-demonstrations-list');
+    this.updateDemonstrationList();
 
     // Initialize training parameter inputs
     this.initializeTrainingParams();
@@ -1063,6 +1095,20 @@ export class TrainingUI {
       oppResetBtn.addEventListener('click', () => {
         this.policyManager.resetToDefault();
         this.renderOpponentOptions();
+      });
+    }
+
+    // Behavior Cloning event listeners
+    const recordBtn = document.getElementById('record-demonstration-button');
+    const cloneBtn = document.getElementById('clone-behavior-button');
+    if (recordBtn) {
+      recordBtn.addEventListener('click', () => {
+        this.toggleDemonstrationRecording();
+      });
+    }
+    if (cloneBtn) {
+      cloneBtn.addEventListener('click', () => {
+        this.startBehaviorCloning();
       });
     }
   }
@@ -1977,6 +2023,184 @@ export class TrainingUI {
    */
   getTrainingParams() {
     return { ...this.trainingParams };
+  }
+
+  /**
+   * Set GameLoop reference for BC
+   * @param {GameLoop} gameLoop - GameLoop instance
+   */
+  setGameLoop(gameLoop) {
+    this.gameLoop = gameLoop;
+    
+    // Setup callback for when episode ends
+    if (this.gameLoop) {
+      this.gameLoop.onDemonstrationComplete = (episode) => {
+        this.promptSaveDemonstration(episode);
+      };
+    }
+  }
+
+  /**
+   * Toggle demonstration recording
+   */
+  toggleDemonstrationRecording() {
+    if (!this.gameLoop) {
+      console.error('GameLoop not set');
+      return;
+    }
+
+    if (this.gameLoop.getRecordingDemonstration()) {
+      this.gameLoop.stopDemonstrationRecording();
+      this.updateRecordButton(false);
+      if (this.bcStatus) {
+        this.bcStatus.textContent = 'Status: Not recording';
+      }
+    } else {
+      const episodeId = `episode_${Date.now()}`;
+      this.gameLoop.startDemonstrationRecording(episodeId);
+      this.updateRecordButton(true);
+      if (this.bcStatus) {
+        this.bcStatus.textContent = 'Status: Recording...';
+      }
+    }
+  }
+
+  /**
+   * Update record button state
+   */
+  updateRecordButton(isRecording) {
+    const recordBtn = document.getElementById('record-demonstration-button');
+    if (recordBtn) {
+      recordBtn.textContent = isRecording ? 'Stop Recording' : 'Record Demonstration';
+      recordBtn.style.backgroundColor = isRecording ? '#f44336' : '';
+    }
+  }
+
+  /**
+   * Prompt user to save demonstration after episode
+   */
+  promptSaveDemonstration(episode) {
+    if (!episode || !episode.steps || episode.steps.length === 0) {
+      return;
+    }
+
+    const shouldSave = confirm(
+      `Episode completed with ${episode.steps.length} steps. ` +
+      `Save this episode for behavior cloning training?`
+    );
+
+    if (shouldSave) {
+      this.saveDemonstration(episode);
+    }
+  }
+
+  /**
+   * Save demonstration to disk
+   */
+  async saveDemonstration(episode) {
+    if (!this.trainingSession) {
+      console.error('Training session not available');
+      return;
+    }
+
+    try {
+      const key = await this.trainingSession.saveDemonstrationEpisode(episode);
+      this.savedDemonstrationKeys.push(key);
+      this.updateDemonstrationList();
+      console.log(`Demonstration saved: ${key}`);
+    } catch (error) {
+      console.error('Failed to save demonstration:', error);
+      alert('Failed to save demonstration. See console for details.');
+    }
+  }
+
+  /**
+   * Start behavior cloning training
+   */
+  async startBehaviorCloning() {
+    if (!this.trainingSession) {
+      alert('Training session not available');
+      return;
+    }
+
+    // Get all saved demonstration keys
+    try {
+      const allKeys = await this.trainingSession.listDemonstrationDatasets();
+      if (allKeys.length === 0) {
+        alert('No demonstrations saved. Please record and save some episodes first.');
+        return;
+      }
+
+      // Disable button during training
+      const cloneButton = document.getElementById('clone-behavior-button');
+      if (cloneButton) {
+        cloneButton.disabled = true;
+        cloneButton.textContent = 'Training...';
+      }
+
+      // Show progress UI
+      if (this.bcTrainingProgress) {
+        this.bcTrainingProgress.style.display = 'block';
+      }
+
+      // Train
+      await this.trainingSession.trainBehaviorCloning(
+        allKeys,
+        (epoch, loss, valLoss) => {
+          // Update progress UI
+          this.updateBCTrainingProgress(epoch, loss, valLoss);
+        }
+      );
+
+      alert('Behavior cloning training completed!');
+    } catch (error) {
+      console.error('Behavior cloning training failed:', error);
+      alert('Training failed. See console for details.');
+    } finally {
+      const cloneButton = document.getElementById('clone-behavior-button');
+      if (cloneButton) {
+        cloneButton.disabled = false;
+        cloneButton.textContent = 'Clone Behavior';
+      }
+      if (this.bcTrainingProgress) {
+        this.bcTrainingProgress.style.display = 'none';
+      }
+    }
+  }
+
+  /**
+   * Update BC training progress display
+   */
+  updateBCTrainingProgress(epoch, loss, valLoss) {
+    if (this.bcTrainingProgress) {
+      this.bcTrainingProgress.innerHTML = `
+        <div>Epoch: ${epoch}</div>
+        <div>Train Loss: ${loss.toFixed(4)}</div>
+        ${valLoss !== undefined ? `<div>Val Loss: ${valLoss.toFixed(4)}</div>` : ''}
+      `;
+    }
+  }
+
+  /**
+   * Update demonstration list display
+   */
+  async updateDemonstrationList() {
+    if (!this.bcDemonstrationsList) {
+      return;
+    }
+
+    try {
+      if (this.trainingSession) {
+        const keys = await this.trainingSession.listDemonstrationDatasets();
+        this.savedDemonstrationKeys = keys;
+        this.bcDemonstrationsList.textContent = `Saved demonstrations: ${keys.length}`;
+      } else {
+        this.bcDemonstrationsList.textContent = 'Saved demonstrations: 0';
+      }
+    } catch (error) {
+      console.error('Failed to update demonstration list:', error);
+      this.bcDemonstrationsList.textContent = 'Saved demonstrations: ?';
+    }
   }
 
   /**
