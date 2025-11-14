@@ -2418,13 +2418,7 @@ export class TrainingUI {
       if (!this.bcLossChart) {
         this.initializeBCLossChart();
       }
-      // Reset chart data
-      if (this.bcLossChart) {
-        this.bcLossChartData.labels = [];
-        this.bcLossChartData.datasets[0].data = [];
-        this.bcLossChartData.datasets[1].data = [];
-        this.bcLossChart.update();
-      }
+      // Don't clear chart data - continue appending to existing data
 
       // Train
       await this.trainingSession.trainBehaviorCloning(
