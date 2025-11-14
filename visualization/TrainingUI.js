@@ -38,6 +38,7 @@ export class TrainingUI {
     this.entropyChart = null;
     this.policyLossChart = null;
     this.valueLossChart = null;
+    this.bcLossChart = null;
 
     // Chart data
     this.chartData = {
@@ -104,6 +105,27 @@ export class TrainingUI {
           data: [],
           borderColor: '#ff9800',
           backgroundColor: 'rgba(255, 152, 0, 0.1)',
+          tension: 0.1
+        }
+      ]
+    };
+
+    // Behavior Cloning loss chart data
+    this.bcLossChartData = {
+      labels: [],
+      datasets: [
+        {
+          label: 'Training Loss',
+          data: [],
+          borderColor: '#4a9eff',
+          backgroundColor: 'rgba(74, 158, 255, 0.1)',
+          tension: 0.1
+        },
+        {
+          label: 'Validation Loss',
+          data: [],
+          borderColor: '#ff6b6b',
+          backgroundColor: 'rgba(255, 107, 107, 0.1)',
           tension: 0.1
         }
       ]
@@ -454,6 +476,10 @@ export class TrainingUI {
           <h4>Value Loss</h4>
           <canvas id="value-loss-chart" width="400" height="300"></canvas>
         </div>
+        <div class="chart-container" id="bc-loss-chart-container" style="display: none; height: 400px;">
+          <h4>Behavior Cloning Loss</h4>
+          <canvas id="bc-loss-chart" width="400" height="300"></canvas>
+        </div>
       </div>
       
       <!-- Instructions Modal -->
@@ -584,6 +610,10 @@ export class TrainingUI {
     this.valueLossChartContainer = document.getElementById('value-loss-chart');
     this.valueLossChartContainerDiv = document.getElementById('value-loss-chart-container');
     
+    // BC loss chart refs
+    this.bcLossChartContainer = document.getElementById('bc-loss-chart');
+    this.bcLossChartContainerDiv = document.getElementById('bc-loss-chart-container');
+    
     // Don't initialize chart until training starts
     // this.initializeChart();
 
@@ -612,6 +642,7 @@ export class TrainingUI {
     this.initializeEntropyChart();
     this.initializePolicyLossChart();
     this.initializeValueLossChart();
+    this.initializeBCLossChart();
   }
 
   /**
@@ -976,6 +1007,42 @@ export class TrainingUI {
       });
     } catch (error) {
       console.error('Failed to initialize value loss chart:', error);
+    }
+  }
+
+  /**
+   * Initialize behavior cloning loss chart
+   */
+  initializeBCLossChart() {
+    console.log('Initializing BC loss chart...');
+    if (!this.bcLossChartContainer) {
+      console.warn('No BC loss chart container found');
+      return;
+    }
+    const ChartConstructor = window.Chart || Chart;
+    if (typeof ChartConstructor === 'undefined') {
+      console.warn('Chart.js not loaded, BC loss chart will be initialized later');
+      return;
+    }
+    try {
+      const ctx = this.bcLossChartContainer.getContext('2d');
+      this.bcLossChart = new ChartConstructor(ctx, {
+        type: 'line',
+        data: this.bcLossChartData,
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          layout: { padding: { top: 10, bottom: 10, left: 10, right: 10 } },
+          scales: {
+            x: { title: { display: true, text: 'Epoch' } },
+            y: { title: { display: true, text: 'Loss' } }
+          },
+          plugins: { legend: { display: true, position: 'top' } }
+        }
+      });
+      console.log('BC loss chart created successfully:', !!this.bcLossChart);
+    } catch (error) {
+      console.error('Failed to initialize BC loss chart:', error);
     }
   }
 
@@ -2143,6 +2210,21 @@ export class TrainingUI {
         this.bcTrainingProgress.style.display = 'block';
       }
 
+      // Show and initialize BC loss chart
+      if (this.bcLossChartContainerDiv) {
+        this.bcLossChartContainerDiv.style.display = 'block';
+      }
+      if (!this.bcLossChart) {
+        this.initializeBCLossChart();
+      }
+      // Reset chart data
+      if (this.bcLossChart) {
+        this.bcLossChartData.labels = [];
+        this.bcLossChartData.datasets[0].data = [];
+        this.bcLossChartData.datasets[1].data = [];
+        this.bcLossChart.update();
+      }
+
       // Train
       await this.trainingSession.trainBehaviorCloning(
         allKeys,
@@ -2178,6 +2260,35 @@ export class TrainingUI {
         <div>Train Loss: ${loss.toFixed(4)}</div>
         ${valLoss !== undefined ? `<div>Val Loss: ${valLoss.toFixed(4)}</div>` : ''}
       `;
+    }
+
+    // Update BC loss chart
+    if (this.bcLossChart) {
+      this.bcLossChartData.labels.push(`Epoch ${epoch}`);
+      this.bcLossChartData.datasets[0].data.push(loss);
+      if (valLoss !== undefined) {
+        this.bcLossChartData.datasets[1].data.push(valLoss);
+      } else {
+        // If no validation loss, push null to maintain array length
+        this.bcLossChartData.datasets[1].data.push(null);
+      }
+
+      // Keep only last 100 data points
+      const maxPoints = 100;
+      if (this.bcLossChartData.labels.length > maxPoints) {
+        this.bcLossChartData.labels.shift();
+        this.bcLossChartData.datasets[0].data.shift();
+        this.bcLossChartData.datasets[1].data.shift();
+      }
+
+      // Update chart asynchronously to avoid blocking
+      const isHidden = typeof document !== 'undefined' && 
+                       (document.hidden || document.visibilityState === 'hidden');
+      if (isHidden) {
+        setTimeout(() => this.bcLossChart.update(), 0);
+      } else {
+        requestAnimationFrame(() => this.bcLossChart.update());
+      }
     }
   }
 
