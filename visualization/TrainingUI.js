@@ -332,6 +332,92 @@ export class TrainingUI {
           margin: 10px 0;
           border-left: 3px solid #4a9eff;
         }
+        .bc-save-modal {
+          display: none;
+          position: fixed;
+          z-index: 10001;
+          left: 0;
+          top: 0;
+          width: 100%;
+          height: 100%;
+          background-color: rgba(0, 0, 0, 0.7);
+          overflow: auto;
+        }
+        .bc-save-modal-content {
+          background-color: #1a1a1a;
+          margin: 15% auto;
+          padding: 30px;
+          border: 2px solid #4a9eff;
+          border-radius: 10px;
+          width: 90%;
+          max-width: 500px;
+          color: #e0e0e0;
+          box-shadow: 0 4px 20px rgba(74, 158, 255, 0.3);
+          text-align: center;
+        }
+        .bc-save-modal-header {
+          margin-bottom: 20px;
+          border-bottom: 2px solid #4a9eff;
+          padding-bottom: 15px;
+        }
+        .bc-save-modal-header h3 {
+          margin: 0;
+          color: #4a9eff;
+          font-size: 1.5em;
+        }
+        .bc-save-modal-body {
+          margin: 20px 0;
+          line-height: 1.6;
+          font-size: 1.1em;
+        }
+        .bc-save-modal-stats {
+          background-color: #2a2a2a;
+          padding: 15px;
+          border-radius: 5px;
+          margin: 15px 0;
+          border: 1px solid #333;
+        }
+        .bc-save-modal-stats strong {
+          color: #4a9eff;
+        }
+        .bc-save-modal-buttons {
+          display: flex;
+          gap: 15px;
+          justify-content: center;
+          margin-top: 25px;
+        }
+        .bc-save-button {
+          padding: 12px 30px;
+          font-size: 1em;
+          border: 2px solid #4a9eff;
+          border-radius: 5px;
+          cursor: pointer;
+          transition: all 0.2s;
+          font-weight: bold;
+          min-width: 120px;
+        }
+        .bc-save-button-yes {
+          background-color: #4a9eff;
+          color: #fff;
+        }
+        .bc-save-button-yes:hover {
+          background-color: #3a8eef;
+          transform: scale(1.05);
+        }
+        .bc-save-button-no {
+          background-color: transparent;
+          color: #4a9eff;
+        }
+        .bc-save-button-no:hover {
+          background-color: rgba(74, 158, 255, 0.1);
+          transform: scale(1.05);
+        }
+        .bc-save-modal-hint {
+          margin-top: 15px;
+          font-size: 0.9em;
+          color: #aaa;
+          font-style: italic;
+        }
       </style>
       <div class="training-controls">
         <h3>Train an AI Agent to Play the Game for You</h3>
@@ -482,6 +568,27 @@ export class TrainingUI {
         </div>
       </div>
       
+      <!-- BC Save Demonstration Modal -->
+      <div id="bc-save-modal" class="bc-save-modal">
+        <div class="bc-save-modal-content">
+          <div class="bc-save-modal-header">
+            <h3>Save Demonstration?</h3>
+          </div>
+          <div class="bc-save-modal-body">
+            <p>Episode completed! Save this episode for behavior cloning training?</p>
+            <div class="bc-save-modal-stats" id="bc-save-modal-stats">
+              <div><strong>Steps:</strong> <span id="bc-save-steps">0</span></div>
+              <div><strong>Duration:</strong> <span id="bc-save-duration">0s</span></div>
+            </div>
+            <div class="bc-save-modal-buttons">
+              <button id="bc-save-yes" class="bc-save-button bc-save-button-yes">Yes (Y)</button>
+              <button id="bc-save-no" class="bc-save-button bc-save-button-no">No (N)</button>
+            </div>
+            <div class="bc-save-modal-hint">Press Y for Yes or N for No</div>
+          </div>
+        </div>
+      </div>
+      
       <!-- Instructions Modal -->
       <div id="instructions-modal" class="instructions-modal">
         <div class="instructions-modal-content">
@@ -626,6 +733,12 @@ export class TrainingUI {
     this.bcStatus = document.getElementById('bc-status');
     this.bcTrainingProgress = document.getElementById('bc-training-progress');
     this.bcDemonstrationsList = document.getElementById('bc-demonstrations-list');
+    this.bcSaveModal = document.getElementById('bc-save-modal');
+    this.bcSaveYesButton = document.getElementById('bc-save-yes');
+    this.bcSaveNoButton = document.getElementById('bc-save-no');
+    this.bcSaveSteps = document.getElementById('bc-save-steps');
+    this.bcSaveDuration = document.getElementById('bc-save-duration');
+    this.pendingEpisode = null;  // Store episode while modal is shown
     this.updateDemonstrationList();
 
     // Initialize training parameter inputs
@@ -1176,6 +1289,50 @@ export class TrainingUI {
     if (cloneBtn) {
       cloneBtn.addEventListener('click', () => {
         this.startBehaviorCloning();
+      });
+    }
+
+    // BC Save Modal event listeners
+    if (this.bcSaveYesButton) {
+      this.bcSaveYesButton.addEventListener('click', () => {
+        this.handleBCSaveYes();
+      });
+    }
+    if (this.bcSaveNoButton) {
+      this.bcSaveNoButton.addEventListener('click', () => {
+        this.handleBCSaveNo();
+      });
+    }
+
+    // Keyboard shortcuts for BC save modal (y/n)
+    document.addEventListener('keydown', (e) => {
+      // Only handle if modal is visible and not typing in an input
+      if (this.bcSaveModal && this.bcSaveModal.style.display === 'block') {
+        const activeElement = document.activeElement;
+        const isInputFocused = activeElement && (
+          activeElement.tagName === 'INPUT' ||
+          activeElement.tagName === 'TEXTAREA' ||
+          activeElement.isContentEditable
+        );
+        
+        if (!isInputFocused) {
+          if (e.key === 'y' || e.key === 'Y') {
+            e.preventDefault();
+            this.handleBCSaveYes();
+          } else if (e.key === 'n' || e.key === 'N') {
+            e.preventDefault();
+            this.handleBCSaveNo();
+          }
+        }
+      }
+    });
+
+    // Close modal when clicking outside
+    if (this.bcSaveModal) {
+      this.bcSaveModal.addEventListener('click', (e) => {
+        if (e.target === this.bcSaveModal) {
+          this.handleBCSaveNo();
+        }
       });
     }
   }
@@ -2151,14 +2308,58 @@ export class TrainingUI {
       return;
     }
 
-    const shouldSave = confirm(
-      `Episode completed with ${episode.steps.length} steps. ` +
-      `Save this episode for behavior cloning training?`
-    );
+    // Store episode for modal handlers
+    this.pendingEpisode = episode;
 
-    if (shouldSave) {
-      this.saveDemonstration(episode);
+    // Update modal content
+    if (this.bcSaveSteps) {
+      this.bcSaveSteps.textContent = episode.steps.length;
     }
+    if (this.bcSaveDuration) {
+      const duration = episode.metadata.duration || 0;
+      const seconds = Math.floor(duration / 1000);
+      const minutes = Math.floor(seconds / 60);
+      const secs = seconds % 60;
+      if (minutes > 0) {
+        this.bcSaveDuration.textContent = `${minutes}m ${secs}s`;
+      } else {
+        this.bcSaveDuration.textContent = `${secs}s`;
+      }
+    }
+
+    // Show modal
+    if (this.bcSaveModal) {
+      this.bcSaveModal.style.display = 'block';
+      // Focus the Yes button for keyboard navigation
+      if (this.bcSaveYesButton) {
+        this.bcSaveYesButton.focus();
+      }
+    }
+  }
+
+  /**
+   * Handle Yes button click or Y key press
+   */
+  handleBCSaveYes() {
+    if (this.bcSaveModal) {
+      this.bcSaveModal.style.display = 'none';
+    }
+    
+    if (this.pendingEpisode) {
+      this.saveDemonstration(this.pendingEpisode);
+      this.pendingEpisode = null;
+    }
+  }
+
+  /**
+   * Handle No button click or N key press
+   */
+  handleBCSaveNo() {
+    if (this.bcSaveModal) {
+      this.bcSaveModal.style.display = 'none';
+    }
+    
+    this.pendingEpisode = null;
   }
 
   /**
