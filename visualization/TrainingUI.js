@@ -479,8 +479,11 @@ export class TrainingUI {
             Training...
           </div>
           <div id="bc-demonstrations-list" style="font-size:12px; color:#aaa;">
-            Saved demonstrations: 0
+            Saved episodes: 0 | Saved steps: 0
           </div>
+          <button id="clear-all-demonstrations-button" class="control-button" style="margin-top:8px; font-size:11px; padding:4px 8px;">
+            Clear All Demonstrations
+          </button>
         </div>
 
         <div class="training-params" style="margin:16px 0; border:1px solid #444; padding:12px; border-radius:4px;">
@@ -739,7 +742,8 @@ export class TrainingUI {
     this.bcSaveSteps = document.getElementById('bc-save-steps');
     this.bcSaveDuration = document.getElementById('bc-save-duration');
     this.pendingEpisode = null;  // Store episode while modal is shown
-    this.updateDemonstrationList();
+    // Don't call updateDemonstrationList() here - trainingSession not set yet
+    // It will be called in setTrainingSession()
 
     // Initialize training parameter inputs
     this.initializeTrainingParams();
@@ -1281,6 +1285,7 @@ export class TrainingUI {
     // Behavior Cloning event listeners
     const recordBtn = document.getElementById('record-demonstration-button');
     const cloneBtn = document.getElementById('clone-behavior-button');
+    const clearBtn = document.getElementById('clear-all-demonstrations-button');
     if (recordBtn) {
       recordBtn.addEventListener('click', () => {
         this.toggleDemonstrationRecording();
@@ -1289,6 +1294,11 @@ export class TrainingUI {
     if (cloneBtn) {
       cloneBtn.addEventListener('click', () => {
         this.startBehaviorCloning();
+      });
+    }
+    if (clearBtn) {
+      clearBtn.addEventListener('click', () => {
+        this.clearAllDemonstrations();
       });
     }
 
@@ -1443,6 +1453,9 @@ export class TrainingUI {
     if (!this.chart && typeof Chart === 'function') {
       this.initializeChart();
     }
+    
+    // Update demonstration list now that training session is available
+    this.updateDemonstrationList();
   }
 
   /**
@@ -2499,13 +2512,73 @@ export class TrainingUI {
       if (this.trainingSession) {
         const keys = await this.trainingSession.listDemonstrationDatasets();
         this.savedDemonstrationKeys = keys;
-        this.bcDemonstrationsList.textContent = `Saved demonstrations: ${keys.length}`;
+        
+        // Load all datasets to count episodes and steps
+        let totalEpisodes = 0;
+        let totalSteps = 0;
+        
+        for (const key of keys) {
+          try {
+            const dataset = await this.trainingSession.demonstrationStorage.loadDataset(key);
+            // Count episodes directly
+            totalEpisodes += dataset.episodes.length;
+            // Count steps directly from episodes (more reliable than metadata)
+            for (const episode of dataset.episodes) {
+              totalSteps += episode.steps.length;
+            }
+          } catch (err) {
+            console.warn(`Failed to load dataset ${key} for counting:`, err);
+          }
+        }
+        
+        this.bcDemonstrationsList.textContent = `Saved episodes: ${totalEpisodes} | Saved steps: ${totalSteps}`;
       } else {
-        this.bcDemonstrationsList.textContent = 'Saved demonstrations: 0';
+        this.bcDemonstrationsList.textContent = 'Saved episodes: 0 | Saved steps: 0';
       }
     } catch (error) {
-      console.error('Failed to update demonstration list:', error);
-      this.bcDemonstrationsList.textContent = 'Saved demonstrations: ?';
+      console.error('[BC] Failed to update demonstration list:', error);
+      this.bcDemonstrationsList.textContent = 'Saved episodes: ? | Saved steps: ?';
+    }
+  }
+
+  /**
+   * Clear all saved demonstrations
+   */
+  async clearAllDemonstrations() {
+    if (!this.trainingSession) {
+      alert('Training session not available');
+      return;
+    }
+
+    const confirmed = confirm(
+      'Are you sure you want to delete ALL saved demonstrations? This cannot be undone.'
+    );
+
+    if (!confirmed) {
+      return;
+    }
+
+    try {
+      const keys = await this.trainingSession.listDemonstrationDatasets();
+      let deletedCount = 0;
+
+      for (const key of keys) {
+        try {
+          await this.trainingSession.deleteDemonstrationDataset(key);
+          deletedCount++;
+        } catch (err) {
+          console.error(`Failed to delete dataset ${key}:`, err);
+        }
+      }
+
+      this.savedDemonstrationKeys = [];
+      await this.updateDemonstrationList();
+      
+      console.log(`[BC] Deleted ${deletedCount} demonstration dataset(s)`);
+      alert(`Successfully deleted ${deletedCount} demonstration dataset(s).`);
+    } catch (error) {
+      console.error('[BC] Failed to clear demonstrations:', error);
+      alert('Failed to clear demonstrations. See console for details.');
     }
   }
 
