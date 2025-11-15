@@ -980,11 +980,13 @@ export class TrainingSession {
   /**
    * Train using behavior cloning on saved demonstrations
    * @param {string[]} datasetKeys - Keys/paths to demonstration datasets
+   * @param {number} epochs - Number of epochs to train (optional, uses trainer default if not provided)
    * @param {Function} onProgress - Progress callback (epoch, loss, valLoss) => void
    * @returns {Promise<BCTrainingStats>} Final training statistics
    */
   async trainBehaviorCloning(
     datasetKeys: string[],
+    epochs?: number,
     onProgress?: (epoch: number, loss: number, valLoss?: number) => void
   ): Promise<BCTrainingStats> {
     if (!this.behaviorCloningTrainer) {
@@ -1016,10 +1018,16 @@ export class TrainingSession {
       throw new Error('No policy agent available for training');
     }
 
+    // Use provided epochs or default from config
+    const trainingEpochs = epochs !== undefined && epochs > 0 
+      ? epochs 
+      : (this.options.behaviorCloningConfig?.epochs || 10);
+
     // Train
     const stats = await this.behaviorCloningTrainer.train(
       mergedDataset,
       policyAgent,
+      trainingEpochs,
       onProgress
     );
 

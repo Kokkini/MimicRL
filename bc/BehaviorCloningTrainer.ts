@@ -100,14 +100,20 @@ export class BehaviorCloningTrainer {
    * Train policy network on demonstration dataset
    * @param {DemonstrationDataset} dataset - Dataset of expert demonstrations
    * @param {PolicyAgent} policyAgent - Policy agent to train (updates policyNetwork)
+   * @param {number} epochs - Number of epochs to train
    * @param {Function} onProgress - Optional progress callback (epoch, loss, valLoss) => void
    * @returns {Promise<BCTrainingStats>} Final training statistics
    */
   async train(
     dataset: DemonstrationDataset,
     policyAgent: PolicyAgent,
+    epochs: number,
     onProgress?: (epoch: number, loss: number, valLoss?: number) => void
   ): Promise<BCTrainingStats> {
+    // Validate epochs
+    if (epochs < 1) {
+      throw new Error('Epochs must be >= 1');
+    }
     // Validate dataset matches policy agent
     this.validateDataset(dataset, policyAgent);
 
@@ -115,7 +121,7 @@ export class BehaviorCloningTrainer {
     const { trainData, valData } = this.prepareTrainingData(dataset, policyAgent);
 
     // Train for specified epochs
-    for (let epoch = 0; epoch < this.config.epochs; epoch++) {
+    for (let epoch = 0; epoch < epochs; epoch++) {
       const epochStats = await this.trainEpoch(
         trainData,
         policyAgent,

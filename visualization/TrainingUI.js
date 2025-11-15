@@ -29,7 +29,11 @@ export class TrainingUI {
     this.bcStatus = null;
     this.bcTrainingProgress = null;
     this.bcDemonstrationsList = null;
+    this.bcEpochsInput = null;
     this.savedDemonstrationKeys = [];
+    
+    // RL UI elements
+    this.rlMaxGamesInput = null;
     
     // Chart instances
     this.chart = null;
@@ -418,6 +422,17 @@ export class TrainingUI {
           color: #aaa;
           font-style: italic;
         }
+        .number-input {
+          padding: 4px;
+          background: #2a2a2a;
+          border: 1px solid #444;
+          color: #e0e0e0;
+          border-radius: 4px;
+        }
+        .number-input:focus {
+          outline: none;
+          border-color: #4a9eff;
+        }
       </style>
       <div class="training-controls">
         <h3>Train an AI Agent to Play the Game for You</h3>
@@ -425,6 +440,10 @@ export class TrainingUI {
         <div class="control-buttons">
           <button id="toggle-training" class="control-button">Start Training</button>
           <button id="instructions-button" class="control-button">Instructions</button>
+        </div>
+        <div style="margin:8px 0; display:flex; align-items:center; justify-content:center; gap:8px;">
+          <label style="font-size:12px; color:#aaa;">Max Games:</label>
+          <input id="rl-max-games-input" type="number" min="1" max="100000" step="100" class="number-input" style="width:80px;" />
         </div>
         
         <div class="training-status">
@@ -472,6 +491,10 @@ export class TrainingUI {
             <button id="record-demonstration-button" class="control-button">Record Demonstration</button>
             <button id="clone-behavior-button" class="control-button" style="margin-left:8px;">Clone Behavior</button>
           </div>
+          <div style="margin-bottom:8px; display:flex; align-items:center; justify-content:center; gap:8px;">
+            <label style="font-size:12px; color:#aaa;">Epochs:</label>
+            <input id="bc-epochs-input" type="number" min="1" max="1000" step="1" value="5" class="number-input" style="width:60px;" />
+          </div>
           <div id="bc-status" style="font-size:12px; color:#aaa; margin-bottom:8px;">
             Status: Not recording
           </div>
@@ -491,27 +514,27 @@ export class TrainingUI {
           <details>
             <summary style="cursor:pointer; margin-bottom:8px;">Training Hyperparameters</summary>
             <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; font-size:12px; margin-bottom:8px;">
-              <div><label>Learning Rate: <input id="param-learningRate" type="number" step="0.0001" min="0.0001" max="1" style="width:80px;" /></label></div>
-              <div><label>Mini Batch Size: <input id="param-miniBatchSize" type="number" step="1" min="1" max="512" style="width:80px;" /></label></div>
-              <div><label>Epochs: <input id="param-epochs" type="number" step="1" min="1" max="20" style="width:80px;" /></label></div>
-              <div><label>Discount Factor: <input id="param-discountFactor" type="number" step="0.01" min="0" max="1" style="width:80px;" /></label></div>
-              <div><label>Clip Ratio: <input id="param-clipRatio" type="number" step="0.01" min="0" max="1" style="width:80px;" /></label></div>
-              <div><label>Value Loss Coeff: <input id="param-valueLossCoeff" type="number" step="0.1" min="0" max="10" style="width:80px;" /></label></div>
-              <div><label>Entropy Coeff: <input id="param-entropyCoeff" type="number" step="0.001" min="0" max="1" style="width:80px;" /></label></div>
-              <div><label>Max Grad Norm: <input id="param-maxGradNorm" type="number" step="0.1" min="0" max="10" style="width:80px;" /></label></div>
-              <div><label>GAE Lambda: <input id="param-gaeLambda" type="number" step="0.01" min="0" max="1" style="width:80px;" /></label></div>
+              <div><label>Learning Rate: <input id="param-learningRate" type="number" step="0.0001" min="0.0001" max="1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Mini Batch Size: <input id="param-miniBatchSize" type="number" step="1" min="1" max="512" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Epochs: <input id="param-epochs" type="number" step="1" min="1" max="20" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Discount Factor: <input id="param-discountFactor" type="number" step="0.01" min="0" max="1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Clip Ratio: <input id="param-clipRatio" type="number" step="0.01" min="0" max="1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Value Loss Coeff: <input id="param-valueLossCoeff" type="number" step="0.1" min="0" max="10" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Entropy Coeff: <input id="param-entropyCoeff" type="number" step="0.001" min="0" max="1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Max Grad Norm: <input id="param-maxGradNorm" type="number" step="0.1" min="0" max="10" class="number-input" style="width:80px;" /></label></div>
+              <div><label>GAE Lambda: <input id="param-gaeLambda" type="number" step="0.01" min="0" max="1" class="number-input" style="width:80px;" /></label></div>
             </div>
           </details>
           <details>
             <summary style="cursor:pointer; margin-top:8px; margin-bottom:8px;">Reward Structure</summary>
             <div style="display:grid; grid-template-columns: repeat(2, 1fr); gap:8px; font-size:12px; margin-bottom:8px;">
-              <div><label>Win Reward: <input id="param-reward-win" type="number" step="0.1" style="width:80px;" /></label></div>
-              <div><label>Loss Reward: <input id="param-reward-loss" type="number" step="0.1" style="width:80px;" /></label></div>
-              <div><label>Tie Reward: <input id="param-reward-tie" type="number" step="0.1" style="width:80px;" /></label></div>
-              <div><label>Time Penalty: <input id="param-reward-timePenalty" type="number" step="0.01" style="width:80px;" /></label></div>
-              <div><label>Max Game Length: <input id="param-reward-maxGameLength" type="number" step="1" min="1" style="width:80px;" /></label></div>
-              <div><label>Distance Penalty Factor: <input id="param-reward-distancePenaltyFactor" type="number" step="0.1" style="width:80px;" /></label></div>
-              <div><label>Delta Distance Reward Factor: <input id="param-reward-deltaDistanceRewardFactor" type="number" step="0.01" min="0" style="width:80px;" /></label></div>
+              <div><label>Win Reward: <input id="param-reward-win" type="number" step="0.1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Loss Reward: <input id="param-reward-loss" type="number" step="0.1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Tie Reward: <input id="param-reward-tie" type="number" step="0.1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Time Penalty: <input id="param-reward-timePenalty" type="number" step="0.01" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Max Game Length: <input id="param-reward-maxGameLength" type="number" step="1" min="1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Distance Penalty Factor: <input id="param-reward-distancePenaltyFactor" type="number" step="0.1" class="number-input" style="width:80px;" /></label></div>
+              <div><label>Delta Distance Reward Factor: <input id="param-reward-deltaDistanceRewardFactor" type="number" step="0.01" min="0" class="number-input" style="width:80px;" /></label></div>
             </div>
           </details>
           <button id="reset-training-params" class="control-button" style="margin-top:8px;">Reset to Defaults</button>
@@ -736,12 +759,25 @@ export class TrainingUI {
     this.bcStatus = document.getElementById('bc-status');
     this.bcTrainingProgress = document.getElementById('bc-training-progress');
     this.bcDemonstrationsList = document.getElementById('bc-demonstrations-list');
+    this.bcEpochsInput = document.getElementById('bc-epochs-input');
     this.bcSaveModal = document.getElementById('bc-save-modal');
     this.bcSaveYesButton = document.getElementById('bc-save-yes');
     this.bcSaveNoButton = document.getElementById('bc-save-no');
     this.bcSaveSteps = document.getElementById('bc-save-steps');
     this.bcSaveDuration = document.getElementById('bc-save-duration');
     this.pendingEpisode = null;  // Store episode while modal is shown
+    
+    // RL UI refs
+    this.rlMaxGamesInput = document.getElementById('rl-max-games-input');
+    
+    // Set default values from config
+    if (this.bcEpochsInput && GameConfig && GameConfig.rl && GameConfig.rl.behaviorCloning && GameConfig.rl.behaviorCloning.epochs) {
+      this.bcEpochsInput.value = GameConfig.rl.behaviorCloning.epochs;
+    }
+    if (this.rlMaxGamesInput && GameConfig && GameConfig.rl && GameConfig.rl.maxGames) {
+      this.rlMaxGamesInput.value = GameConfig.rl.maxGames;
+    }
+    
     // Don't call updateDemonstrationList() here - trainingSession not set yet
     // It will be called in setTrainingSession()
 
@@ -1356,7 +1392,7 @@ export class TrainingUI {
         `<tr>
           <td>${o.label}</td>
           <td>${o.type}</td>
-          <td><input data-opp-id="${o.id}" class="opp-weight" type="number" min="0" step="1" value="${Number(o.weight)||0}" style="width:64px;" /></td>
+          <td><input data-opp-id="${o.id}" class="opp-weight number-input" type="number" min="0" step="1" value="${Number(o.weight)||0}" style="width:64px;" /></td>
           <td>${o.id==='random'?'':`<button data-del-id="${o.id}" class="control-button">Delete</button>`}</td>
         </tr>`
       );
@@ -1501,6 +1537,12 @@ export class TrainingUI {
     }
 
     try {
+      // Get maxGames from input
+      const maxGames = this.rlMaxGamesInput ? parseInt(this.rlMaxGamesInput.value, 10) : null;
+      if (maxGames !== null && !isNaN(maxGames) && maxGames >= 1) {
+        this.trainingSession.options.maxGames = maxGames;
+      }
+      
       // Update training session with current UI parameters before starting
       const params = this.getTrainingParams();
       await this.trainingSession.updateTrainingParams(params);
@@ -2433,9 +2475,17 @@ export class TrainingUI {
       }
       // Don't clear chart data - continue appending to existing data
 
+      // Get epochs from input
+      const epochs = this.bcEpochsInput ? parseInt(this.bcEpochsInput.value, 10) : 5;
+      if (isNaN(epochs) || epochs < 1) {
+        alert('Invalid epochs value. Please enter a number >= 1.');
+        return;
+      }
+
       // Train
       await this.trainingSession.trainBehaviorCloning(
         allKeys,
+        epochs,
         (epoch, loss, valLoss) => {
           // Update progress UI
           this.updateBCTrainingProgress(epoch, loss, valLoss);
