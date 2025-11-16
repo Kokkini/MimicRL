@@ -1747,10 +1747,9 @@ export class TrainingUI {
     this.updateStatus('Training Complete');
     this.updateMetrics(metrics);
     
-    // Only update chart if we have valid training data
-    if (metrics && metrics.gamesCompleted > 0) {
-      this.updateChart(metrics);
-    }
+    // Don't update chart here - the last rollout's data was already added by notifyTrainingProgress()
+    // This prevents duplicate data points with the same stats
+    // The chart should already have all the data from the training session
     
     console.log('Training completed!', metrics);
   }
@@ -1803,7 +1802,7 @@ export class TrainingUI {
    */
   updateChart(metrics) {
     // Only update chart if training is active
-    if (!this.trainingSession || !this.trainingSession.isTraining) {
+    if (!this.trainingSession) {
       return;
     }
 
@@ -1975,8 +1974,9 @@ export class TrainingUI {
    */
   updatePolicyLossChart(batchStats, batchNumber) {
     if (!this.policyLossChart) return;
+    // Use policyLoss from batchStats if available (captured synchronously), otherwise fallback to trainerStats
     const trainerStats = (this.trainingSession && this.trainingSession.trainer && this.trainingSession.trainer.getStats) ? this.trainingSession.trainer.getStats() : {};
-    const loss = trainerStats.policyLoss || 0;
+    const loss = typeof batchStats.policyLoss === 'number' ? batchStats.policyLoss : (trainerStats.policyLoss || 0);
     this.policyLossChart.data.labels.push(`Rollout ${batchNumber}`);
     this.policyLossChart.data.datasets[0].data.push(loss);
     const maxPoints = GameConfig.rl.chartMaxDataPoints;
@@ -1992,8 +1992,9 @@ export class TrainingUI {
    */
   updateValueLossChart(batchStats, batchNumber) {
     if (!this.valueLossChart) return;
+    // Use valueLoss from batchStats if available (captured synchronously), otherwise fallback to trainerStats
     const trainerStats = (this.trainingSession && this.trainingSession.trainer && this.trainingSession.trainer.getStats) ? this.trainingSession.trainer.getStats() : {};
-    const loss = trainerStats.valueLoss || 0;
+    const loss = typeof batchStats.valueLoss === 'number' ? batchStats.valueLoss : (trainerStats.valueLoss || 0);
     this.valueLossChart.data.labels.push(`Rollout ${batchNumber}`);
     this.valueLossChart.data.datasets[0].data.push(loss);
     const maxPoints = GameConfig.rl.chartMaxDataPoints;
@@ -2045,6 +2046,11 @@ export class TrainingUI {
     const lossRate = gamesCompleted > 0 ? (losses / gamesCompleted) * 100 : 0;
     const tieRate = gamesCompleted > 0 ? (ties / gamesCompleted) * 100 : 0;
     
+    // Pass through training stats (policyLoss, valueLoss, policyEntropy) from metrics
+    const policyLoss = metrics.policyLoss;
+    const valueLoss = metrics.valueLoss;
+    const policyEntropy = metrics.policyEntropy;
+    
     console.log('Calculated stats:', { 
       avg: rewardStats.avg, 
       min: rewardStats.min, 
@@ -2064,7 +2070,9 @@ export class TrainingUI {
       winRate,
       lossRate,
       tieRate,
-      policyEntropy: metrics.policyEntropy || 0
+      policyEntropy: policyEntropy !== undefined ? policyEntropy : 0,
+      policyLoss: policyLoss !== undefined ? policyLoss : undefined,
+      valueLoss: valueLoss !== undefined ? valueLoss : undefined
     };
   }
 

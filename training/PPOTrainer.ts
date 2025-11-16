@@ -97,6 +97,9 @@ export class PPOTrainer {
     try {
       console.log(`PPO Training with ${experiences.length} experiences`);
       
+      // Reset stats at the start of training to ensure clean state
+      this.resetStats();
+      
       // Prepare training data
       const trainingData = this.prepareTrainingData(experiences, policyAgent);
       

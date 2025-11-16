@@ -400,6 +400,12 @@ export class TrainingSession {
       // Reset metrics
       this.trainingMetrics.reset();
 
+      // Reinitialize rollout collectors if they were cleared (e.g., after stop/complete)
+      if (!this.rolloutCollectors || this.rolloutCollectors.length === 0) {
+        console.log('Reinitializing rollout collectors...');
+        await this.initializeRolloutCollectors();
+      }
+
       // Start rollout-based training loop (don't await - it runs asynchronously)
       this.runTrainingLoop().catch(error => {
         console.error('Training loop error:', error);
@@ -466,7 +472,9 @@ export class TrainingSession {
           // Update weights in all collectors (for next iteration)
           await this.updateCollectorWeights();
           
-          // Yield before UI update to ensure responsiveness
+          // Yield multiple times to ensure all tensor operations are fully complete
+          // This is important for entropy calculation which happens inside tf.tidy()
+          await this.yieldToEventLoop();
           await this.yieldToEventLoop();
           
           // Update UI after training completes with rollout-specific stats
@@ -537,13 +545,9 @@ export class TrainingSession {
     this.isTraining = false;
     this.isPaused = false;
 
-    // Dispose rollout collectors
-    if (this.rolloutCollectors) {
-      for (const collector of this.rolloutCollectors) {
-        // Collectors don't have dispose, but we can clear the array
-      }
-      this.rolloutCollectors = [];
-    }
+    // Don't clear rollout collectors - they will be reused on next start
+    // This allows training to be restarted without reinitializing everything
+    // The collectors will be reinitialized in start() if needed
 
     // Save final model
     this.saveModel();
@@ -641,11 +645,11 @@ export class TrainingSession {
       }
     }
     
-    // Update games completed count
+    // Note: gamesCompleted is already incremented in onEpisodeEnd callback during rollout collection
+    // So we don't need to increment it again here. This function only updates the metrics statistics.
     const completedGames = wins + losses + ties;
     if (completedGames > 0) {
-      this.gamesCompleted += completedGames;
-      console.log(`[TrainingSession] Updated metrics: ${completedGames} games completed (${wins}W ${losses}L ${ties}T), total games: ${this.gamesCompleted}`);
+      console.log(`[TrainingSession] Updated metrics: ${completedGames} games from this rollout (${wins}W ${losses}L ${ties}T), total games: ${this.gamesCompleted}`);
     }
   }
 
@@ -753,6 +757,28 @@ export class TrainingSession {
       this.trainingMetrics.trainingTime = Date.now() - this.trainingStartTime;
     }
     
+    // Capture training stats synchronously (before async callback) to avoid race condition
+    // where next training iteration overwrites the value before callback executes
+    const trainerStats = (this.trainer && (this.trainer as any).getStats) 
+      ? (this.trainer as any).getStats() : null;
+    const currentEntropy = trainerStats ? (trainerStats.entropy || 0) : 0;
+    const currentPolicyLoss = trainerStats ? (trainerStats.policyLoss || 0) : 0;
+    const currentValueLoss = trainerStats ? (trainerStats.valueLoss || 0) : 0;
+    
+    // Debug logging to help diagnose entropy issues
+    if (rolloutStats && currentEntropy === 0 && trainerStats) {
+      console.warn(`[TrainingSession] Entropy is 0 for rollout at game ${rolloutStats.gamesCompleted}. Trainer stats:`, {
+        entropy: trainerStats.entropy,
+        policyLoss: trainerStats.policyLoss,
+        valueLoss: trainerStats.valueLoss
+      });
+    }
+    
+    console.log("[My log]", {
+      entropy: currentEntropy,
+      policyLoss: currentPolicyLoss,
+      valueLoss: currentValueLoss
+    })
     // Schedule UI updates asynchronously
     setTimeout(() => {
       const metricsToSend = rolloutStats 
@@ -765,20 +791,23 @@ export class TrainingSession {
             ties: rolloutStats.ties,
             winRate: rolloutStats.winRate,
             rewardStats: rolloutStats.rewardStats,
-            policyEntropy: (this.trainer && (this.trainer as any).getStats) ? ((this.trainer as any).getStats().entropy || 0) : 0
+            policyEntropy: currentEntropy,
+            policyLoss: currentPolicyLoss,
+            valueLoss: currentValueLoss
           }
         : {
             ...this.trainingMetrics,
-            policyEntropy: (this.trainer && (this.trainer as any).getStats) ? ((this.trainer as any).getStats().entropy || 0) : 0
+            policyEntropy: currentEntropy,
+            policyLoss: currentPolicyLoss,
+            valueLoss: currentValueLoss
           };
       
       if (this.onTrainingProgress) {
         this.onTrainingProgress(metricsToSend);
       }
       
-      if (this.onGameEnd && this.gamesCompleted > 0) {
-        this.onGameEnd(null, this.gamesCompleted, this.trainingMetrics);
-      }
+      // Don't call onGameEnd here - it's already called immediately in onEpisodeEnd callback
+      // during rollout collection. Calling it here would cause delayed/duplicate UI updates.
     }, 0);
   }
 
@@ -799,12 +828,26 @@ export class TrainingSession {
     // Save final model
     await this.saveModel();
 
+    // Capture training stats synchronously before stopping (same as notifyTrainingProgress)
+    // to ensure we have the correct entropy/loss values for the final chart update
+    const trainerStats = (this.trainer && (this.trainer as any).getStats) 
+      ? (this.trainer as any).getStats() : null;
+    const finalEntropy = trainerStats ? (trainerStats.entropy || 0) : 0;
+    const finalPolicyLoss = trainerStats ? (trainerStats.policyLoss || 0) : 0;
+    const finalValueLoss = trainerStats ? (trainerStats.valueLoss || 0) : 0;
+
     // Stop training
     this.stop();
 
-    // Notify completion
+    // Notify completion with metrics that include the captured training stats
     if (this.onTrainingComplete) {
-      this.onTrainingComplete(this.trainingMetrics);
+      const finalMetrics = {
+        ...this.trainingMetrics,
+        policyEntropy: finalEntropy,
+        policyLoss: finalPolicyLoss,
+        valueLoss: finalValueLoss
+      } as any; // Cast to any since we're adding extra properties for chart display
+      this.onTrainingComplete(finalMetrics);
     }
   }
 
