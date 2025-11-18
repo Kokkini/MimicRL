@@ -1716,26 +1716,41 @@ export class TrainingUI {
    * @param {Object} metrics - Training metrics
    */
   updateTrainingProgress(metrics) {
-    // Update metrics immediately (lightweight DOM updates)
-    this.updateMetrics(metrics);
+    // Check if this is a status-only update (before training starts)
+    // Status-only updates should not update metrics/chart to avoid duplicate data points
+    const isStatusOnly = metrics && metrics._statusOnly === true;
     
-    // Schedule chart update asynchronously to avoid blocking training
-    if (metrics && metrics.gamesCompleted > 0) {
-      console.log('[TrainingUI] updateTrainingProgress:', {
-        gamesCompleted: metrics.gamesCompleted,
-        winRateRaw: metrics.winRate,
-        winRatePercent: metrics.winRate * 100
-      });
+    if (!isStatusOnly) {
+      // Update metrics immediately (lightweight DOM updates)
+      this.updateMetrics(metrics);
       
-      // Use requestAnimationFrame when tab is visible, setTimeout when hidden
-      const isHidden = typeof document !== 'undefined' && 
-                       (document.hidden || document.visibilityState === 'hidden');
-      if (isHidden) {
-        setTimeout(() => this.updateChart(metrics), 0);
-      } else {
-        requestAnimationFrame(() => this.updateChart(metrics));
+      // Schedule chart update asynchronously to avoid blocking training
+      // Only update chart if we have complete metrics with training stats
+      // (policyEntropy, policyLoss, valueLoss indicate training has completed)
+      const hasTrainingStats = metrics && (
+        metrics.policyEntropy !== undefined ||
+        metrics.policyLoss !== undefined ||
+        metrics.valueLoss !== undefined
+      );
+      
+      if (metrics && metrics.gamesCompleted > 0 && hasTrainingStats) {
+        console.log('[TrainingUI] updateTrainingProgress:', {
+          gamesCompleted: metrics.gamesCompleted,
+          winRateRaw: metrics.winRate,
+          winRatePercent: metrics.winRate * 100
+        });
+        
+        // Use requestAnimationFrame when tab is visible, setTimeout when hidden
+        const isHidden = typeof document !== 'undefined' && 
+                         (document.hidden || document.visibilityState === 'hidden');
+        if (isHidden) {
+          setTimeout(() => this.updateChart(metrics), 0);
+        } else {
+          requestAnimationFrame(() => this.updateChart(metrics));
+        }
       }
     }
+    // If status-only, we only update the status (which is already done in the callback)
   }
 
   /**

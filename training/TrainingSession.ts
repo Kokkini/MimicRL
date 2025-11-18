@@ -465,6 +465,19 @@ export class TrainingSession {
           // Yield before training to allow UI updates
           await this.yieldToEventLoop();
           
+          // Notify UI that training is starting (status update only, no metrics/chart update)
+          // We'll update status directly without triggering full metrics update
+          if (this.onTrainingProgress) {
+            // Send a status-only update by including a flag or incomplete metrics
+            // The UI will check for training stats before updating chart
+            const statusUpdate = {
+              ...this.trainingMetrics,
+              gamesCompleted: rolloutStats?.gamesCompleted || this.gamesCompleted,
+              _statusOnly: true  // Flag to indicate this is just a status update
+            };
+            this.onTrainingProgress(statusUpdate);
+          }
+          
           if (this.trainer && this.policyAgent) {
             await this.trainWithRollouts(allExperiences, allLastValues);
           }
