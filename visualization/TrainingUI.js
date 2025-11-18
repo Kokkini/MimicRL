@@ -468,23 +468,6 @@ export class TrainingUI {
           </div>
         </div>
 
-        <div class="opponent-config">
-          <h3>Blue (Player) Settings</h3>
-          <button id="export-weights" class="control-button">Export Weights</button>
-          <button id="import-weights" class="control-button">Import Weights</button>
-          <input id="import-weights-file" type="file" accept="application/json" style="display:none" />
-        </div>
-
-        <div class="opponent-config">
-          <h3>Red (Opponent) Settings</h3>
-          <div id="opp-options-list"></div>
-          <div style="margin-top:8px;">
-            <button id="opp-add-policy" class="control-button">Add Policy (Upload JSON)</button>
-            <input id="opp-upload-input" type="file" accept="application/json" style="display:none" />
-            <button id="opp-reset" class="control-button">Reset to Random</button>
-          </div>
-        </div>
-
         <div class="behavior-cloning-config" style="margin:16px 0; border:1px solid #444; padding:12px; border-radius:4px;">
           <h3>Behavior Cloning</h3>
           <div style="margin-bottom:8px;">
@@ -507,6 +490,23 @@ export class TrainingUI {
           <button id="clear-all-demonstrations-button" class="control-button" style="margin-top:8px; font-size:11px; padding:4px 8px;">
             Clear All Demonstrations
           </button>
+        </div>
+
+        <div class="opponent-config">
+          <h3>Blue (Player) Settings</h3>
+          <button id="export-weights" class="control-button">Export Weights</button>
+          <button id="import-weights" class="control-button">Import Weights</button>
+          <input id="import-weights-file" type="file" accept="application/json" style="display:none" />
+        </div>
+
+        <div class="opponent-config">
+          <h3>Red (Opponent) Settings</h3>
+          <div id="opp-options-list"></div>
+          <div style="margin-top:8px;">
+            <button id="opp-add-policy" class="control-button">Add Policy (Upload JSON)</button>
+            <input id="opp-upload-input" type="file" accept="application/json" style="display:none" />
+            <button id="opp-reset" class="control-button">Reset to Random</button>
+          </div>
         </div>
 
         <div class="training-params" style="margin:16px 0; border:1px solid #444; padding:12px; border-radius:4px;">
