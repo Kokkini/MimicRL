@@ -3,8 +3,53 @@
  * Uses localStorage for model persistence and IndexedDB for large data
  */
 
+interface ModelManagerConfig {
+  storagePrefix?: string;
+  maxModels?: number;
+  autoSaveInterval?: number;
+  compressionEnabled?: boolean;
+}
+
+interface ModelData {
+  id: string;
+  model: any;
+  metadata: {
+    savedAt: string;
+    version: string;
+    [key: string]: any;
+  };
+}
+
+interface ModelInfo {
+  id: string;
+  metadata: {
+    savedAt: string;
+    [key: string]: any;
+  };
+  size: number;
+}
+
+interface StorageStats {
+  totalSize: number;
+  modelCount: number;
+  localStorageUsage: number;
+  maxStorage: number;
+  usagePercentage: number;
+}
+
+interface SerializableModel {
+  id?: string;
+  serialize(): any;
+}
+
 export class ModelManager {
-  constructor(config = {}) {
+  private storagePrefix: string;
+  private maxModels: number;
+  private autoSaveInterval: number;
+  private compressionEnabled: boolean;
+  private db: IDBDatabase | null = null;
+
+  constructor(config: ModelManagerConfig = {}) {
     this.storagePrefix = config.storagePrefix || 'saber_rl_';
     this.maxModels = config.maxModels || 10;
     this.autoSaveInterval = config.autoSaveInterval || 50; // Auto-save every N games
@@ -16,7 +61,7 @@ export class ModelManager {
   /**
    * Initialize storage systems
    */
-  async initializeStorage() {
+  async initializeStorage(): Promise<void> {
     try {
       // Check localStorage availability
       if (typeof Storage === 'undefined') {
@@ -36,7 +81,7 @@ export class ModelManager {
   /**
    * Initialize IndexedDB for large data storage
    */
-  async initializeIndexedDB() {
+  async initializeIndexedDB(): Promise<void> {
     return new Promise((resolve, reject) => {
       const request = indexedDB.open('SabeRL_RL_Data', 1);
       
@@ -47,7 +92,7 @@ export class ModelManager {
       };
       
       request.onupgradeneeded = (event) => {
-        const db = event.target.result;
+        const db = (event.target as IDBOpenDBRequest).result;
         
         // Create object stores
         if (!db.objectStoreNames.contains('models')) {
@@ -68,11 +113,11 @@ export class ModelManager {
   /**
    * Save a neural network model
    * Only keeps the current/latest model - overwrites previous saves
-   * @param {Object} model - Neural network model
-   * @param {Object} metadata - Additional metadata
-   * @returns {Promise<string>} Model ID
+   * @param model - Neural network model
+   * @param metadata - Additional metadata
+   * @returns Model ID
    */
-  async saveModel(model, metadata = {}) {
+  async saveModel(model: SerializableModel, metadata: Record<string, any> = {}): Promise<string> {
     try {
       // Use fixed key for current model - overwrites previous save
       const FIXED_MODEL_KEY = `${this.storagePrefix}current_model`;
@@ -98,7 +143,7 @@ export class ModelManager {
       const modelId = model.id || this.generateModelId();
       const serializedModel = model.serialize();
       
-      const modelData = {
+      const modelData: ModelData = {
         id: modelId,
         model: serializedModel,
         metadata: {
@@ -113,8 +158,8 @@ export class ModelManager {
       
       // Save to IndexedDB for backup (also overwrites with fixed ID)
       const indexedDBData = {
-        id: 'current_model', // Fixed ID for IndexedDB too
-        ...modelData
+        ...modelData,
+        id: 'current_model' // Fixed ID for IndexedDB too (overwrite the id from modelData)
       };
       await this.saveToIndexedDB('models', indexedDBData);
       
@@ -130,10 +175,10 @@ export class ModelManager {
    * Clean up old model entries from localStorage
    * Removes all model entries except the current one
    */
-  cleanupOldModels() {
+  cleanupOldModels(): void {
     try {
       const FIXED_MODEL_KEY = `${this.storagePrefix}current_model`;
-      const keysToRemove = [];
+      const keysToRemove: string[] = [];
       
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
@@ -158,10 +203,10 @@ export class ModelManager {
 
   /**
    * Load a neural network model
-   * @param {string} modelId - Model ID (optional, defaults to current model)
-   * @returns {Promise<Object>} Loaded model
+   * @param modelId - Model ID (optional, defaults to current model)
+   * @returns Loaded model
    */
-  async loadModel(modelId = null) {
+  async loadModel(modelId: string | null = null): Promise<any> {
     try {
       // If no modelId provided, load the current model
       const storageKey = modelId 
@@ -171,13 +216,13 @@ export class ModelManager {
       const storedData = localStorage.getItem(storageKey);
       
       if (storedData) {
-        const modelData = JSON.parse(storedData);
+        const modelData = JSON.parse(storedData) as ModelData;
         return this.deserializeModel(modelData.model);
       }
       
       // Fallback to IndexedDB (try current_model first, then provided ID)
       const dbId = modelId || 'current_model';
-      const modelData = await this.loadFromIndexedDB('models', dbId);
+      const modelData = await this.loadFromIndexedDB('models', dbId) as ModelData | null;
       if (modelData) {
         return this.deserializeModel(modelData.model);
       }
@@ -191,22 +236,22 @@ export class ModelManager {
 
   /**
    * List all saved models
-   * @returns {Promise<Array>} List of model information
+   * @returns List of model information
    */
-  async listModels() {
+  async listModels(): Promise<ModelInfo[]> {
     try {
-      const models = [];
+      const models: ModelInfo[] = [];
       const modelListKey = `${this.storagePrefix}model_list`;
       const modelList = localStorage.getItem(modelListKey);
       
       if (modelList) {
-        const list = JSON.parse(modelList);
+        const list = JSON.parse(modelList) as string[];
         for (const modelId of list) {
           const storageKey = `${this.storagePrefix}model_${modelId}`;
           const storedData = localStorage.getItem(storageKey);
           
           if (storedData) {
-            const modelData = JSON.parse(storedData);
+            const modelData = JSON.parse(storedData) as ModelData;
             models.push({
               id: modelId,
               metadata: modelData.metadata,
@@ -216,7 +261,7 @@ export class ModelManager {
         }
       }
       
-      return models.sort((a, b) => new Date(b.metadata.savedAt) - new Date(a.metadata.savedAt));
+      return models.sort((a, b) => new Date(b.metadata.savedAt).getTime() - new Date(a.metadata.savedAt).getTime());
     } catch (error) {
       console.error('Failed to list models:', error);
       return [];
@@ -225,10 +270,10 @@ export class ModelManager {
 
   /**
    * Delete a model
-   * @param {string} modelId - Model ID
-   * @returns {Promise<boolean>} Success status
+   * @param modelId - Model ID
+   * @returns Success status
    */
-  async deleteModel(modelId) {
+  async deleteModel(modelId: string): Promise<boolean> {
     try {
       // Remove from localStorage
       const storageKey = `${this.storagePrefix}model_${modelId}`;
@@ -250,10 +295,10 @@ export class ModelManager {
 
   /**
    * Save training session data
-   * @param {Object} sessionData - Training session data
-   * @returns {Promise<string>} Session ID
+   * @param sessionData - Training session data
+   * @returns Session ID
    */
-  async saveTrainingSession(sessionData) {
+  async saveTrainingSession(sessionData: Record<string, any>): Promise<string> {
     try {
       const sessionId = sessionData.id || this.generateSessionId();
       const data = {
@@ -275,17 +320,17 @@ export class ModelManager {
 
   /**
    * Load training session data
-   * @param {string} sessionId - Session ID
-   * @returns {Promise<Object>} Session data
+   * @param sessionId - Session ID
+   * @returns Session data
    */
-  async loadTrainingSession(sessionId) {
+  async loadTrainingSession(sessionId: string): Promise<Record<string, any>> {
     try {
       const sessionData = await this.loadFromIndexedDB('sessions', sessionId);
       if (!sessionData) {
         throw new Error(`Session not found: ${sessionId}`);
       }
       
-      return sessionData;
+      return sessionData as Record<string, any>;
     } catch (error) {
       console.error('Failed to load training session:', error);
       throw error;
@@ -294,10 +339,10 @@ export class ModelManager {
 
   /**
    * Save experience data
-   * @param {Array} experiences - Experience data
-   * @returns {Promise<string>} Experience ID
+   * @param experiences - Experience data
+   * @returns Experience ID
    */
-  async saveExperiences(experiences) {
+  async saveExperiences(experiences: any[]): Promise<string> {
     try {
       const experienceId = this.generateExperienceId();
       const data = {
@@ -320,12 +365,12 @@ export class ModelManager {
 
   /**
    * Load experience data
-   * @param {string} experienceId - Experience ID
-   * @returns {Promise<Array>} Experience data
+   * @param experienceId - Experience ID
+   * @returns Experience data
    */
-  async loadExperiences(experienceId) {
+  async loadExperiences(experienceId: string): Promise<any[]> {
     try {
-      const data = await this.loadFromIndexedDB('experiences', experienceId);
+      const data = await this.loadFromIndexedDB('experiences', experienceId) as { experiences: any[] } | null;
       if (!data) {
         throw new Error(`Experiences not found: ${experienceId}`);
       }
@@ -339,9 +384,9 @@ export class ModelManager {
 
   /**
    * Get storage usage statistics
-   * @returns {Object} Storage statistics
+   * @returns Storage statistics
    */
-  getStorageStats() {
+  getStorageStats(): StorageStats {
     try {
       let totalSize = 0;
       let modelCount = 0;
@@ -351,9 +396,11 @@ export class ModelManager {
         const key = localStorage.key(i);
         if (key && key.startsWith(this.storagePrefix)) {
           const value = localStorage.getItem(key);
-          totalSize += value.length;
-          if (key.includes('model_')) {
-            modelCount++;
+          if (value) {
+            totalSize += value.length;
+            if (key.includes('model_')) {
+              modelCount++;
+            }
           }
         }
       }
@@ -373,12 +420,12 @@ export class ModelManager {
 
   /**
    * Clear all stored data
-   * @returns {Promise<boolean>} Success status
+   * @returns Success status
    */
-  async clearAllData() {
+  async clearAllData(): Promise<boolean> {
     try {
       // Clear localStorage
-      const keysToRemove = [];
+      const keysToRemove: string[] = [];
       for (let i = 0; i < localStorage.length; i++) {
         const key = localStorage.key(i);
         if (key && key.startsWith(this.storagePrefix)) {
@@ -395,7 +442,7 @@ export class ModelManager {
         
         for (const storeName of stores) {
           const store = transaction.objectStore(storeName);
-          await new Promise((resolve, reject) => {
+          await new Promise<void>((resolve, reject) => {
             const request = store.clear();
             request.onsuccess = () => resolve();
             request.onerror = () => reject(request.error);
@@ -413,10 +460,10 @@ export class ModelManager {
 
   /**
    * Deserialize model from stored data
-   * @param {Object} modelData - Serialized model data
-   * @returns {Object} Deserialized model
+   * @param modelData - Serialized model data
+   * @returns Deserialized model
    */
-  deserializeModel(modelData) {
+  deserializeModel(modelData: any): any {
     // This would depend on the specific model implementation
     // For now, return the data as-is
     return modelData;
@@ -424,15 +471,14 @@ export class ModelManager {
 
   /**
    * Save data to IndexedDB
-   * @param {string} storeName - Store name
-   * @param {Object} data - Data to save
-   * @returns {Promise<void>}
+   * @param storeName - Store name
+   * @param data - Data to save
    */
-  async saveToIndexedDB(storeName, data) {
+  async saveToIndexedDB(storeName: string, data: any): Promise<void> {
     if (!this.db) return;
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([storeName], 'readwrite');
+    return new Promise<void>((resolve, reject) => {
+      const transaction = this.db!.transaction([storeName], 'readwrite');
       const store = transaction.objectStore(storeName);
       const request = store.put(data);
       
@@ -443,15 +489,15 @@ export class ModelManager {
 
   /**
    * Load data from IndexedDB
-   * @param {string} storeName - Store name
-   * @param {string} key - Data key
-   * @returns {Promise<Object>} Loaded data
+   * @param storeName - Store name
+   * @param key - Data key
+   * @returns Loaded data
    */
-  async loadFromIndexedDB(storeName, key) {
+  async loadFromIndexedDB(storeName: string, key: string): Promise<any> {
     if (!this.db) return null;
     
     return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([storeName], 'readonly');
+      const transaction = this.db!.transaction([storeName], 'readonly');
       const store = transaction.objectStore(storeName);
       const request = store.get(key);
       
@@ -462,15 +508,14 @@ export class ModelManager {
 
   /**
    * Delete data from IndexedDB
-   * @param {string} storeName - Store name
-   * @param {string} key - Data key
-   * @returns {Promise<void>}
+   * @param storeName - Store name
+   * @param key - Data key
    */
-  async deleteFromIndexedDB(storeName, key) {
+  async deleteFromIndexedDB(storeName: string, key: string): Promise<void> {
     if (!this.db) return;
     
-    return new Promise((resolve, reject) => {
-      const transaction = this.db.transaction([storeName], 'readwrite');
+    return new Promise<void>((resolve, reject) => {
+      const transaction = this.db!.transaction([storeName], 'readwrite');
       const store = transaction.objectStore(storeName);
       const request = store.delete(key);
       
@@ -481,13 +526,12 @@ export class ModelManager {
 
   /**
    * Update model list
-   * @param {string} modelId - Model ID
-   * @param {Object} modelData - Model data
-   * @returns {Promise<void>}
+   * @param modelId - Model ID
+   * @param _modelData - Model data (unused, kept for API compatibility)
    */
-  async updateModelList(modelId, modelData) {
+  async updateModelList(modelId: string, _modelData: any): Promise<void> {
     const modelListKey = `${this.storagePrefix}model_list`;
-    let modelList = [];
+    let modelList: string[] = [];
     
     const stored = localStorage.getItem(modelListKey);
     if (stored) {
@@ -508,15 +552,14 @@ export class ModelManager {
 
   /**
    * Remove from model list
-   * @param {string} modelId - Model ID
-   * @returns {Promise<void>}
+   * @param modelId - Model ID
    */
-  async removeFromModelList(modelId) {
+  async removeFromModelList(modelId: string): Promise<void> {
     const modelListKey = `${this.storagePrefix}model_list`;
     const stored = localStorage.getItem(modelListKey);
     
     if (stored) {
-      const modelList = JSON.parse(stored);
+      const modelList = JSON.parse(stored) as string[];
       const filteredList = modelList.filter(id => id !== modelId);
       localStorage.setItem(modelListKey, JSON.stringify(filteredList));
     }
@@ -524,25 +567,26 @@ export class ModelManager {
 
   /**
    * Generate unique model ID
-   * @returns {string} Model ID
+   * @returns Model ID
    */
-  generateModelId() {
+  generateModelId(): string {
     return `model_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
    * Generate unique session ID
-   * @returns {string} Session ID
+   * @returns Session ID
    */
-  generateSessionId() {
+  generateSessionId(): string {
     return `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 
   /**
    * Generate unique experience ID
-   * @returns {string} Experience ID
+   * @returns Experience ID
    */
-  generateExperienceId() {
+  generateExperienceId(): string {
     return `exp_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
   }
 }
+

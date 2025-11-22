@@ -297,22 +297,28 @@ export class TrainingSession {
   async initializeRolloutCollectors(): Promise<void> {
     this.rolloutCollectors = [];
     
+    // Parallel rollouts require cloning gameCore instances, which is game-specific
+    // For now, only support single rollout (numRollouts = 1)
+    if (this.numRollouts !== 1) {
+      throw new Error(
+        `Parallel rollouts (numRollouts=${this.numRollouts}) are not yet supported. ` +
+        `Set RL_PARALLEL_GAMES to 1. To support parallel rollouts, implement a proper ` +
+        `cloning mechanism (e.g., a clone() method on GameCore interface or a factory function).`
+      );
+    }
+    
     const rolloutConfig = GameConfig.rl.rollout;
     
-    for (let i = 0; i < this.numRollouts; i++) {
-      // Create headless core for each collector (clone of gameCore)
-      // Note: This assumes gameCore has a constructor that takes config
-      const core = new (this.gameCore.constructor as any)((this.gameCore as any).config);
-      
-      // Use the policy agent for player 0 (first trainable player)
-      const agent = this.policyAgent;
-      if (!agent) {
-        throw new Error('PolicyAgent not initialized');
-      }
-      
-      const collector = new RolloutCollector(
-        core,
-        agent,
+    // For single rollout, use the existing gameCore directly
+    // Use the policy agent for player 0 (first trainable player)
+    const agent = this.policyAgent;
+    if (!agent) {
+      throw new Error('PolicyAgent not initialized');
+    }
+    
+    const collector = new RolloutCollector(
+      this.gameCore,
+      agent,
         {
           rolloutMaxLength: rolloutConfig.rolloutMaxLength,
           deltaTime: rolloutConfig.deltaTime,
@@ -353,9 +359,8 @@ export class TrainingSession {
           }
         }
       );
-      
-      this.rolloutCollectors.push(collector);
-    }
+    
+    this.rolloutCollectors.push(collector);
     
     console.log(`Initialized ${this.rolloutCollectors.length} rollout collectors`);
   }

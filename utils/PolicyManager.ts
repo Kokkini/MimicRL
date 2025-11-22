@@ -1,14 +1,70 @@
-import { PolicyAgent } from '../agents/PolicyAgent.js';
-import { NetworkUtils } from './NetworkUtils.js';
-
 /**
  * PolicyManager maintains a weighted list of policy options.
  * Options can be 'random' or 'policy' (backed by a PolicyAgent).
  * This is a general manager for any player - all players are treated equally.
  * It persists configuration and caches constructed agents.
  */
+
+import { PolicyAgent } from '../agents/PolicyAgent.js';
+import { NetworkUtils } from './NetworkUtils.js';
+import { GameCore, ActionSpace } from '../core/GameCore.js';
+
+// TensorFlow.js is loaded from CDN as a global 'tf' object
+declare const tf: any;
+
+interface SerializedNetworkData {
+  architecture: {
+    inputSize: number;
+    hiddenLayers: number[];
+    outputSize: number;
+    activation: string;
+  };
+  weights: Array<{
+    data: number[];
+    shape: number[];
+    dtype: string;
+  }>;
+}
+
+interface PolicyBundle {
+  policy?: SerializedNetworkData;
+  policyNetwork?: SerializedNetworkData;
+  value?: SerializedNetworkData;
+  valueNetwork?: SerializedNetworkData;
+  learnableStd?: number[] | { data: number[]; shape: number[]; dtype: string };
+  observationSize?: number;
+  actionSize?: number;
+  actionSpaces?: ActionSpace[];
+}
+
+interface PolicyOption {
+  id: string;
+  label: string;
+  type: 'random' | 'policy';
+  weight: number;
+  // Policy-specific fields (only present when type === 'policy')
+  policyData?: SerializedNetworkData;
+  valueData?: SerializedNetworkData;
+  learnableStd?: number[];
+  observationSize?: number;
+  actionSize?: number;
+  actionSpaces?: ActionSpace[];
+}
+
+interface SampledOption {
+  id: string;
+  label: string;
+  type: 'random' | 'policy';
+  agent?: PolicyAgent;
+}
+
 export class PolicyManager {
-  constructor(gameCore = null, storageKey = 'saber_rl_policy_config') {
+  private gameCore: GameCore | null;
+  private storageKey: string;
+  private options: PolicyOption[];
+  private agentCache: Map<string, PolicyAgent>;
+
+  constructor(gameCore: GameCore | null = null, storageKey: string = 'saber_rl_policy_config') {
     this.gameCore = gameCore; // GameCore interface - needed to get observation/action sizes
     this.storageKey = storageKey;
     this.options = [];
@@ -21,29 +77,31 @@ export class PolicyManager {
 
   /**
    * Set the GameCore (needed for creating PolicyAgents)
-   * @param {GameCore} gameCore - GameCore interface
+   * @param gameCore - GameCore interface
    */
-  setGameCore(gameCore) {
+  setGameCore(gameCore: GameCore | null): void {
     this.gameCore = gameCore;
     // Clear cache when GameCore changes (agents need correct observation/action sizes)
     this.dispose();
   }
 
-  resetToDefault() {
+  resetToDefault(): void {
     this.options = [
       { id: 'random', label: 'Random', type: 'random', weight: 1 }
     ];
     this.persist();
   }
 
-  getOptions() { return [...this.options]; }
+  getOptions(): PolicyOption[] {
+    return [...this.options];
+  }
 
-  setOptions(opts) {
+  setOptions(opts: PolicyOption[]): void {
     this.options = Array.isArray(opts) ? opts.filter(Boolean) : [];
     this.persist();
   }
 
-  updateWeight(id, weight) {
+  updateWeight(id: string, weight: number): void {
     const opt = this.options.find(o => o.id === id);
     if (opt) {
       opt.weight = Math.max(0, Number(weight) || 0);
@@ -51,12 +109,20 @@ export class PolicyManager {
     }
   }
 
-  removeOption(id) {
+  removeOption(id: string): void {
     this.options = this.options.filter(o => o.id !== id);
     const cached = this.agentCache.get(id);
-    if (cached && cached.dispose) try { cached.dispose(); } catch(_) {}
+    if (cached && cached.dispose) {
+      try {
+        cached.dispose();
+      } catch (_) {
+        // ignore
+      }
+    }
     this.agentCache.delete(id);
-    if (this.options.length === 0) this.resetToDefault();
+    if (this.options.length === 0) {
+      this.resetToDefault();
+    }
     this.persist();
   }
 
@@ -70,7 +136,7 @@ export class PolicyManager {
    * - actionSize: number (optional, will use GameCore if available)
    * - actionSpaces: ActionSpace[] (optional, will use GameCore if available)
    */
-  addPolicy(label, bundle) {
+  addPolicy(label: string, bundle: PolicyBundle): string {
     // Handle both formats: {policy, value} and {policyNetwork, valueNetwork}
     const policyData = bundle.policy || bundle.policyNetwork;
     const valueData = bundle.value || bundle.valueNetwork;
@@ -80,14 +146,18 @@ export class PolicyManager {
     }
     
     // Handle learnableStd format: can be array or object with {data, shape, dtype}
-    let learnableStd = bundle.learnableStd;
-    if (learnableStd && typeof learnableStd === 'object' && learnableStd.data) {
-      // Convert from {data, shape, dtype} format to array
-      learnableStd = learnableStd.data;
+    let learnableStd: number[] | undefined = undefined;
+    if (bundle.learnableStd) {
+      if (Array.isArray(bundle.learnableStd)) {
+        learnableStd = bundle.learnableStd;
+      } else if (typeof bundle.learnableStd === 'object' && 'data' in bundle.learnableStd) {
+        // Convert from {data, shape, dtype} format to array
+        learnableStd = (bundle.learnableStd as { data: number[] }).data;
+      }
     }
     
-    const id = `policy_${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
-    const option = {
+    const id = `policy_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const option: PolicyOption = {
       id,
       label: label || `Policy ${this.options.length}`,
       type: 'policy',
@@ -109,7 +179,7 @@ export class PolicyManager {
    * Sample one option by weights. Returns { type, id, label, agent? }
    * This can be used for any player - the caller decides which player to assign it to.
    */
-  sample() {
+  sample(): SampledOption {
     const total = this.options.reduce((s, o) => s + Math.max(0, Number(o.weight) || 0), 0);
     if (total <= 0) {
       return { id: 'random', label: 'Random', type: 'random' };
@@ -119,7 +189,7 @@ export class PolicyManager {
       const w = Math.max(0, Number(o.weight) || 0);
       if (r < w) {
         if (o.type === 'policy') {
-          const agent = this.#getOrCreateAgent(o);
+          const agent = this.getOrCreateAgent(o);
           if (!agent) {
             return { id: 'random', label: 'Random', type: 'random' };
           }
@@ -132,19 +202,25 @@ export class PolicyManager {
     return { id: 'random', label: 'Random', type: 'random' };
   }
 
-  #getOrCreateAgent(option) {
+  private getOrCreateAgent(option: PolicyOption): PolicyAgent | null {
     try {
-      if (this.agentCache.has(option.id)) return this.agentCache.get(option.id);
+      if (this.agentCache.has(option.id)) {
+        return this.agentCache.get(option.id)!;
+      }
+      
+      if (option.type !== 'policy' || !option.policyData) {
+        return null;
+      }
       
       // Get observation/action info from bundle or GameCore
       const observationSize = option.observationSize || (this.gameCore?.getObservationSize?.() || 9);
       const actionSize = option.actionSize || (this.gameCore?.getActionSize?.() || 4);
       const actionSpaces = option.actionSpaces || (this.gameCore?.getActionSpaces?.() || 
-        new Array(actionSize).fill(null).map(() => ({ type: 'discrete' })));
+        new Array(actionSize).fill(null).map(() => ({ type: 'discrete' as const })));
       
       // Load policy network from serialized data
       // Handle both old format (NeuralNetwork.serialize) and new format (NetworkUtils.serializeNetwork)
-      let policyNetwork;
+      let policyNetwork: any;
       if (option.policyData.architecture && option.policyData.weights) {
         // New format: NetworkUtils serialized format
         policyNetwork = NetworkUtils.loadNetworkFromSerialized(option.policyData);
@@ -152,19 +228,19 @@ export class PolicyManager {
         // Old format: NeuralNetwork.serialize format (has architecture, weights, id, etc.)
         policyNetwork = NetworkUtils.loadNetworkFromSerialized({
           architecture: {
-            inputSize: option.policyData.architecture.inputSize || observationSize,
-            hiddenLayers: option.policyData.architecture.hiddenLayers || [64, 32],
-            outputSize: option.policyData.architecture.outputSize || actionSize,
-            activation: option.policyData.architecture.activation || 'relu'
+            inputSize: (option.policyData as any).architecture.inputSize || observationSize,
+            hiddenLayers: (option.policyData as any).architecture.hiddenLayers || [64, 32],
+            outputSize: (option.policyData as any).architecture.outputSize || actionSize,
+            activation: (option.policyData as any).architecture.activation || 'relu'
           },
-          weights: option.policyData.weights || []
+          weights: (option.policyData as any).weights || []
         });
       } else {
         throw new Error('Invalid policy data format');
       }
       
       // Load value network if available, otherwise create default
-      let valueNetwork = null;
+      let valueNetwork: any = null;
       if (option.valueData && option.valueData.architecture && option.valueData.weights) {
         valueNetwork = NetworkUtils.loadNetworkFromSerialized(option.valueData);
       }
@@ -187,7 +263,7 @@ export class PolicyManager {
     }
   }
 
-  persist() {
+  persist(): void {
     try {
       const shallow = this.options.map(o => ({
         id: o.id,
@@ -208,21 +284,25 @@ export class PolicyManager {
     }
   }
 
-  load() {
+  load(): void {
     try {
       const s = localStorage.getItem(this.storageKey);
       if (!s) return;
       const parsed = JSON.parse(s);
       const options = Array.isArray(parsed?.options) ? parsed.options : [];
-      this.options = options;
+      this.options = options as PolicyOption[];
     } catch (e) {
       this.options = [];
     }
   }
 
-  dispose() {
-    for (const [,agent] of this.agentCache) {
-      try { agent.dispose(); } catch(_) {}
+  dispose(): void {
+    for (const [, agent] of this.agentCache) {
+      try {
+        agent.dispose();
+      } catch (_) {
+        // ignore
+      }
     }
     this.agentCache.clear();
   }

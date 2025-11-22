@@ -744,6 +744,68 @@ const session = new TrainingSession(gameCore, controllers, {
 });
 ```
 
+## Training Visualization
+
+MimicRL includes a lightweight, game-agnostic visualization component for debugging training progress:
+
+### TrainingVisualizer
+
+A simple chart-based component that displays core RL metrics without any game-specific dependencies:
+
+```javascript
+import { TrainingVisualizer } from './MimicRL/visualization/TrainingVisualizer.js';
+
+// Create visualizer (container must exist in HTML)
+const visualizer = new TrainingVisualizer('training-viz-container', {
+  maxDataPoints: 100,
+  episodeLengthUnit: 'seconds',  // or 'steps'
+  actionIntervalSeconds: 0.2
+});
+
+// Attach to training session for automatic updates
+visualizer.attachToSession(trainingSession);
+
+// Or update manually
+visualizer.updateMetrics({
+  gamesCompleted: 100,
+  rewardStats: { avg: 0.5, min: -1.0, max: 2.0 },
+  averageGameLength: 80,
+  winRate: 0.75,  // or completionRate
+  policyEntropy: 0.9,
+  policyLoss: 0.01,
+  valueLoss: 0.5,
+  trainingTime: 3600000  // milliseconds
+});
+```
+
+**Features:**
+- **Reward Progress Chart**: Average, min, and max rewards over rollouts
+- **Episode Length Chart**: Average episode length over time
+- **Completion Rate Chart**: Success/completion percentage
+- **Policy Metrics Chart**: Entropy, policy loss, and value loss
+- **Summary Stats**: Real-time text display of key metrics
+
+**HTML Setup:**
+```html
+<div id="training-viz-container"></div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@latest"></script>
+```
+
+**Options:**
+- `maxDataPoints`: Maximum data points to keep in charts (default: 100)
+- `showCompletionRate`: Show completion rate chart (default: true)
+- `episodeLengthUnit`: 'steps' or 'seconds' (default: 'steps')
+- `actionIntervalSeconds`: Seconds per step for conversion (default: 0.2)
+
+**Methods:**
+- `attachToSession(trainingSession)`: Automatically update from session callbacks
+- `updateMetrics(metrics)`: Manually update with metrics object
+- `reset()`: Clear all data
+- `show()` / `hide()`: Toggle visibility
+- `dispose()`: Clean up resources
+
+**Note:** Requires Chart.js to be loaded globally. The component gracefully handles Chart.js not being available.
+
 ## API Reference
 
 ### Core Interfaces

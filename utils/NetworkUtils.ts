@@ -1,25 +1,39 @@
 /**
  * NetworkUtils - Utility functions for network serialization/deserialization
  * Game-agnostic utilities for saving and loading TensorFlow.js models
- * JavaScript version (TypeScript version also exists)
  */
 
 // TensorFlow.js is loaded from CDN as a global 'tf' object
+declare const tf: any;
+
+export interface SerializedNetworkData {
+  architecture: {
+    inputSize: number;
+    hiddenLayers: number[];
+    outputSize: number;
+    activation: string;
+  };
+  weights: Array<{
+    data: number[];
+    shape: number[];
+    dtype: string;
+  }>;
+}
+
+export interface NetworkArchitecture {
+  inputSize: number;
+  hiddenLayers: number[];
+  outputSize: number;
+  activation: string;
+}
 
 export class NetworkUtils {
   /**
    * Load a tf.LayersModel from serialized weights
-   * @param {Object} serializedData - Serialized network data
-   * @param {Object} serializedData.architecture - Network architecture config
-   *   - inputSize: number - Input layer size
-   *   - hiddenLayers: number[] - Hidden layer sizes
-   *   - outputSize: number - Output layer size
-   *   - activation: string - Activation function for hidden layers
-   * @param {Array} serializedData.weights - Serialized weights array
-   *   Each element: { data: number[], shape: number[], dtype: string }
-   * @returns {tf.LayersModel} Loaded model with weights restored
+   * @param serializedData - Serialized network data
+   * @returns Loaded model with weights restored
    */
-  static loadNetworkFromSerialized(serializedData) {
+  static loadNetworkFromSerialized(serializedData: SerializedNetworkData): any {
     const { architecture, weights } = serializedData;
     
     // Create model with same architecture
@@ -63,13 +77,13 @@ export class NetworkUtils {
   
   /**
    * Serialize a tf.LayersModel to a storable format
-   * @param {tf.LayersModel} model - Model to serialize
-   * @param {Object} architecture - Architecture config (inputSize, hiddenLayers, outputSize, activation)
-   * @returns {Object} Serialized model data
+   * @param model - Model to serialize
+   * @param architecture - Architecture config (inputSize, hiddenLayers, outputSize, activation)
+   * @returns Serialized model data
    */
-  static serializeNetwork(model, architecture) {
+  static serializeNetwork(model: any, architecture: NetworkArchitecture): SerializedNetworkData {
     const weights = model.getWeights();
-    const serializedWeights = weights.map(w => ({
+    const serializedWeights = weights.map((w: any) => ({
       data: Array.from(w.dataSync()),
       shape: w.shape,
       dtype: w.dtype
