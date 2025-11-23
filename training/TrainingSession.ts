@@ -77,6 +77,7 @@ export class TrainingSession {
   public isPaused: boolean;
   public currentGame: number;
   public gamesCompleted: number;
+  public totalExperiences: number; // Total number of experiences collected across all rollouts
   public trainingStartTime: number;
   public lastSaveTime: number;
 
@@ -126,6 +127,7 @@ export class TrainingSession {
     this.isPaused = false;
     this.currentGame = 0;
     this.gamesCompleted = 0;
+    this.totalExperiences = 0;
     this.trainingStartTime = 0;
     this.lastSaveTime = 0;
 
@@ -336,9 +338,11 @@ export class TrainingSession {
             }
             return null; // null => random AI
           },
-          onEpisodeEnd: (outcome) => {
+          onEpisodeEnd: (outcome, episodeLength) => {
             // Increment games immediately; detailed metrics updated after rollout
             this.gamesCompleted += 1;
+            // Update total experiences immediately when episode ends
+            this.totalExperiences += episodeLength || 0;
             // Update per-episode metrics for immediate win rate/UI refresh
             try {
               // outcome is now an array: ['win', 'loss'] or ['tie', 'tie']
@@ -401,6 +405,7 @@ export class TrainingSession {
       this.trainingStartTime = Date.now();
       this.currentGame = 0;
       this.gamesCompleted = 0;
+      this.totalExperiences = 0;
 
       // Reset metrics
       this.trainingMetrics.reset();
@@ -457,7 +462,8 @@ export class TrainingSession {
           allLastValues.push(result.lastValue);
         }
         
-        console.log(`Collected ${allExperiences.length} experiences from ${rolloutResults.length} rollouts`);
+        // Note: totalExperiences is now updated in onEpisodeEnd callback when each episode completes
+        // No need to update here to avoid double counting
         
         // Train PPO with collected experiences
         if (allExperiences.length > 0) {
@@ -940,9 +946,9 @@ export class TrainingSession {
       }
     );
 
-    // Serialize learnableStd
-    const learnableStdArray = Array.from(agent.learnableStd.dataSync());
-    const learnableStdShape = agent.learnableStd.shape;
+    // Serialize learnableLogStd
+    const learnableLogStdArray = Array.from(agent.learnableLogStd.dataSync());
+    const learnableLogStdShape = agent.learnableLogStd.shape;
 
     return {
       version: '1.0.0',
@@ -952,10 +958,10 @@ export class TrainingSession {
       networkArchitecture: agent.networkArchitecture,
       policyNetwork: policyNetworkData,
       valueNetwork: valueNetworkData,
-      learnableStd: {
-        data: learnableStdArray,
-        shape: learnableStdShape,
-        dtype: agent.learnableStd.dtype
+      learnableLogStd: {
+        data: learnableLogStdArray,
+        shape: learnableLogStdShape,
+        dtype: agent.learnableLogStd.dtype
       },
       metadata: {
         gamesCompleted: this.gamesCompleted,
@@ -980,19 +986,27 @@ export class TrainingSession {
     // Load value network
     const valueNetwork = NetworkUtils.loadNetworkFromSerialized(bundle.valueNetwork);
 
-    // Load learnableStd
+    // Load learnableLogStd
     // Access tf from global scope (TensorFlow.js loaded from CDN)
     const tf = (window as any).tf;
     if (!tf) {
       throw new Error('TensorFlow.js not loaded');
     }
     
-    const learnableStdTensor = tf.tensor(
-      bundle.learnableStd.data,
-      bundle.learnableStd.shape,
-      bundle.learnableStd.dtype
+    if (!bundle.learnableLogStd) {
+      throw new Error('Bundle missing learnableLogStd');
+    }
+    
+    const logStdData = bundle.learnableLogStd.data;
+    const logStdShape = bundle.learnableLogStd.shape;
+    const logStdDtype = bundle.learnableLogStd.dtype;
+    
+    const learnableLogStdTensor = tf.tensor(
+      logStdData,
+      logStdShape,
+      logStdDtype
     );
-    const learnableStd = tf.variable(learnableStdTensor, true);
+    const learnableLogStd = tf.variable(learnableLogStdTensor, true);
 
     // Create new PolicyAgent with loaded weights
     const newAgent = new PolicyAgent({
@@ -1002,14 +1016,14 @@ export class TrainingSession {
       policyNetwork: policyNetwork,
       valueNetwork: valueNetwork,
       networkArchitecture: bundle.networkArchitecture,
-      initialStd: bundle.learnableStd.data // Will be overridden below
+      initialLogStd: logStdData // Will be overridden below
     });
 
-    // Replace learnableStd (dispose old one first)
-    if (newAgent.learnableStd) {
-      newAgent.learnableStd.dispose();
+    // Replace learnableLogStd (dispose old one first)
+    if (newAgent.learnableLogStd) {
+      newAgent.learnableLogStd.dispose();
     }
-    (newAgent as any).learnableStd = learnableStd;
+    (newAgent as any).learnableLogStd = learnableLogStd;
 
     // Dispose old agent
     if (this.policyAgent) {

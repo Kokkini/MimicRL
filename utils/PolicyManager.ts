@@ -8,6 +8,7 @@
 import { PolicyAgent } from '../agents/PolicyAgent.js';
 import { NetworkUtils } from './NetworkUtils.js';
 import { GameCore, ActionSpace } from '../core/GameCore.js';
+import { GameConstants } from '../../utils/constants';
 
 // TensorFlow.js is loaded from CDN as a global 'tf' object
 declare const tf: any;
@@ -31,7 +32,7 @@ interface PolicyBundle {
   policyNetwork?: SerializedNetworkData;
   value?: SerializedNetworkData;
   valueNetwork?: SerializedNetworkData;
-  learnableStd?: number[] | { data: number[]; shape: number[]; dtype: string };
+  learnableLogStd?: number[] | { data: number[]; shape: number[]; dtype: string };
   observationSize?: number;
   actionSize?: number;
   actionSpaces?: ActionSpace[];
@@ -45,7 +46,7 @@ interface PolicyOption {
   // Policy-specific fields (only present when type === 'policy')
   policyData?: SerializedNetworkData;
   valueData?: SerializedNetworkData;
-  learnableStd?: number[];
+  learnableLogStd?: number[];
   observationSize?: number;
   actionSize?: number;
   actionSpaces?: ActionSpace[];
@@ -131,7 +132,7 @@ export class PolicyManager {
    * Bundle should contain:
    * - policy OR policyNetwork: SerializedNetworkData for policy network
    * - value OR valueNetwork: SerializedNetworkData for value network (optional, will create default if missing)
-   * - learnableStd: number[] or object with {data, shape, dtype} for learnable standard deviations (optional, will use default if missing)
+   * - learnableLogStd: number[] or object with {data, shape, dtype} for learnable log standard deviations (optional, will use default if missing)
    * - observationSize: number (optional, will use GameCore if available)
    * - actionSize: number (optional, will use GameCore if available)
    * - actionSpaces: ActionSpace[] (optional, will use GameCore if available)
@@ -145,14 +146,13 @@ export class PolicyManager {
       throw new Error('Invalid bundle: missing policy (expected "policy" or "policyNetwork" property)');
     }
     
-    // Handle learnableStd format: can be array or object with {data, shape, dtype}
-    let learnableStd: number[] | undefined = undefined;
-    if (bundle.learnableStd) {
-      if (Array.isArray(bundle.learnableStd)) {
-        learnableStd = bundle.learnableStd;
-      } else if (typeof bundle.learnableStd === 'object' && 'data' in bundle.learnableStd) {
-        // Convert from {data, shape, dtype} format to array
-        learnableStd = (bundle.learnableStd as { data: number[] }).data;
+    // Handle learnableLogStd format: can be array or object with {data, shape, dtype}
+    let learnableLogStd: number[] | undefined = undefined;
+    if (bundle.learnableLogStd) {
+      if (Array.isArray(bundle.learnableLogStd)) {
+        learnableLogStd = bundle.learnableLogStd;
+      } else if (typeof bundle.learnableLogStd === 'object' && 'data' in bundle.learnableLogStd) {
+        learnableLogStd = (bundle.learnableLogStd as { data: number[] }).data;
       }
     }
     
@@ -165,7 +165,7 @@ export class PolicyManager {
       // Store the full bundle for later reconstruction
       policyData: policyData,
       valueData: valueData, // Optional
-      learnableStd: learnableStd, // Optional
+      learnableLogStd: learnableLogStd, // Optional
       observationSize: bundle.observationSize, // Optional
       actionSize: bundle.actionSize, // Optional
       actionSpaces: bundle.actionSpaces // Optional
@@ -252,7 +252,7 @@ export class PolicyManager {
         actionSpaces: actionSpaces,
         policyNetwork: policyNetwork,
         valueNetwork: valueNetwork, // Will create default if null
-        initialStd: option.learnableStd || 0.1
+        initialLogStd: option.learnableLogStd || GameConstants.RL_INITIAL_LOG_STD
       });
       
       this.agentCache.set(option.id, agent);
@@ -273,7 +273,7 @@ export class PolicyManager {
         // Store all policy-related data for reconstruction
         policyData: o.type === 'policy' ? o.policyData : undefined,
         valueData: o.type === 'policy' ? o.valueData : undefined,
-        learnableStd: o.type === 'policy' ? o.learnableStd : undefined,
+        learnableLogStd: o.type === 'policy' ? o.learnableLogStd : undefined,
         observationSize: o.type === 'policy' ? o.observationSize : undefined,
         actionSize: o.type === 'policy' ? o.actionSize : undefined,
         actionSpaces: o.type === 'policy' ? o.actionSpaces : undefined

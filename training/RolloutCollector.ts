@@ -17,7 +17,7 @@ export interface RolloutCollectorConfig {
 export interface RolloutCollectorHooks {
   sampleOpponent?: () => any; // PlayerController
   getActionForPlayer?: (playerIndex: number, observation: number[]) => Action;
-  onEpisodeEnd?: (outcome: ('win' | 'loss' | 'tie')[] | null) => void;
+  onEpisodeEnd?: (outcome: ('win' | 'loss' | 'tie')[] | null, episodeLength: number) => void;
 }
 
 export interface Experience {
@@ -119,6 +119,7 @@ export class RolloutCollector {
     }
     
     let experienceCount = 0;
+    let currentEpisodeLength = 0; // Track experiences in current episode
     
     while (rolloutBuffer.length < this.rolloutMaxLength) {
       // Get action from agent (for player 0, the trainable player)
@@ -163,12 +164,14 @@ export class RolloutCollector {
         outcome: nextState.done ? nextState.outcome : null
       });
       experienceCount++;
+      currentEpisodeLength++; // Increment current episode length
       
       state = nextState;
       if (nextState.done) {
         if (typeof this.hooks.onEpisodeEnd === 'function') {
-          try { this.hooks.onEpisodeEnd(nextState.outcome || null); } catch (_) {}
+          try { this.hooks.onEpisodeEnd(nextState.outcome || null, currentEpisodeLength); } catch (_) {}
         }
+        currentEpisodeLength = 0; // Reset for next episode
         state = this.core.reset();
         // New episode: re-sample opponent
         if (typeof this.hooks.sampleOpponent === 'function') {

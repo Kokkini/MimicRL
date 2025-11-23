@@ -249,7 +249,7 @@ export class PPOTrainer {
       const advStd = advantages.sub(advMean).square().mean().sqrt();
       const normAdvantages = advantages.sub(advMean).div(advStd.add(1e-8));
 
-      // Update policy model and learnableStd using minimize
+      // Update policy model and learnableLogStd using minimize
       this.policyOptimizer.minimize(() => {
         // Recompute log probabilities inside gradient function
         const currentLogProbs = this.recomputeLogProbs(batch.states, batch.actions, policyAgent);
@@ -335,8 +335,9 @@ export class PPOTrainer {
       const continuousOutputs = tf.gather(policyOutput, continuousIndices, 1);
       const continuousActions = tf.gather(actions, continuousIndices, 1);
       
-      const stdValues = tf.gather(policyAgent.learnableStd, continuousIndices, 0);
-      const stdExpanded = stdValues.expandDims(0).tile([batchSize, 1]);
+      const logStdValues = tf.gather(policyAgent.learnableLogStd, continuousIndices, 0);
+      const logStdExpanded = logStdValues.expandDims(0).tile([batchSize, 1]);
+      const stdExpanded = tf.exp(logStdExpanded); // std = exp(logStd)
       
       const diff = continuousActions.sub(continuousOutputs);
       const normalized = diff.div(stdExpanded);
@@ -382,8 +383,9 @@ export class PPOTrainer {
     
     // Handle continuous actions
     if (continuousIndices.length > 0) {
-      const stdValues = tf.gather(policyAgent.learnableStd, continuousIndices, 0);
-      const stdExpanded = stdValues.expandDims(0).tile([batchSize, 1]);
+      const logStdValues = tf.gather(policyAgent.learnableLogStd, continuousIndices, 0);
+      const logStdExpanded = logStdValues.expandDims(0).tile([batchSize, 1]);
+      const stdExpanded = tf.exp(logStdExpanded); // std = exp(logStd)
       
       const entropyContinuous = tf.scalar(0.5).mul(tf.log(tf.scalar(2 * Math.PI * Math.E).mul(stdExpanded.square()).add(1e-8)));
       

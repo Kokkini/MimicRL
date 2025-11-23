@@ -5,6 +5,7 @@
  */
 
 import { Action, ActionSpace } from '../core/GameCore.js';
+import { GameConstants } from '../../utils/constants';
 
 // TensorFlow.js is loaded from CDN as a global 'tf' object
 // We declare it here for TypeScript
@@ -17,7 +18,7 @@ export interface PolicyAgentConfig {
   actionSpaces: ActionSpace[];
   policyNetwork?: any; // tf.LayersModel
   valueNetwork?: any; // tf.LayersModel
-  initialStd?: number | number[];
+  initialLogStd?: number | number[];
   networkArchitecture?: {
     policyHiddenLayers?: number[];
     valueHiddenLayers?: number[];
@@ -46,7 +47,7 @@ export class PolicyAgent {
   };
   public readonly policyNetwork: any; // tf.LayersModel
   public readonly valueNetwork: any; // tf.LayersModel
-  public readonly learnableStd: any; // tf.Variable
+  public readonly learnableLogStd: any; // tf.Variable (log of standard deviation)
   public isActive: boolean;
 
   constructor(config: PolicyAgentConfig) {
@@ -75,16 +76,17 @@ export class PolicyAgent {
     this.policyNetwork = config.policyNetwork || this.createDefaultPolicyNetwork();
     this.valueNetwork = config.valueNetwork || this.createDefaultValueNetwork();
     
-    // Learnable std parameters: one per action index (array of size actionSize)
-    // For discrete actions, the std is unused but still stored for consistency
-    const initStd = config.initialStd ?? 0.1;
-    const initStdArray = Array.isArray(initStd) 
-      ? initStd 
-      : new Array(this.actionSize).fill(initStd);
-    if (initStdArray.length !== this.actionSize) {
-      throw new Error(`Initial std array length (${initStdArray.length}) must match action size (${this.actionSize})`);
+    // Learnable log(std) parameters: one per action index (array of size actionSize)
+    // We learn log(std) instead of std directly to ensure std = exp(logStd) is always positive
+    // For discrete actions, the logStd is unused but still stored for consistency
+    const initLogStd = config.initialLogStd ?? GameConstants.RL_INITIAL_LOG_STD;
+    const initLogStdArray = Array.isArray(initLogStd) 
+      ? initLogStd 
+      : new Array(this.actionSize).fill(initLogStd);
+    if (initLogStdArray.length !== this.actionSize) {
+      throw new Error(`Initial logStd array length (${initLogStdArray.length}) must match action size (${this.actionSize})`);
     }
-    this.learnableStd = tf.variable(tf.tensor1d(initStdArray), true); // trainable array
+    this.learnableLogStd = tf.variable(tf.tensor1d(initLogStdArray), true); // trainable array
     
     this.isActive = false;
   }
@@ -132,8 +134,9 @@ export class PolicyAgent {
       } else if (actionSpace.type === 'continuous') {
         // Continuous: Use reparameterization trick in original action units
         const mean: number = outputArray[i] as number;  // Mean in original units
-        const stdArray: number[] = Array.from(this.learnableStd.dataSync() as Float32Array | Int32Array);
-        const std: number = stdArray[i] as number; // std for action index i
+        const logStdArray: number[] = Array.from(this.learnableLogStd.dataSync() as Float32Array | Int32Array);
+        const logStd: number = logStdArray[i] as number; // log(std) for action index i
+        const std: number = Math.exp(logStd); // std = exp(logStd), always positive
         const epsilon_i: number = epsilonArray[i] as number; // epsilon ~ N(0, 1)
         const sampled: number = mean + std * epsilon_i;
         action[i] = sampled;
@@ -262,8 +265,8 @@ export class PolicyAgent {
     if (this.valueNetwork) {
       this.valueNetwork.dispose();
     }
-    if (this.learnableStd) {
-      this.learnableStd.dispose();
+    if (this.learnableLogStd) {
+      this.learnableLogStd.dispose();
     }
     this.isActive = false;
   }

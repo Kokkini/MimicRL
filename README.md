@@ -416,7 +416,7 @@ const result = agent.act(observation);
 **Key Properties:**
 - `policyNetwork`: TensorFlow.js model for policy (outputs action logits/means)
 - `valueNetwork`: TensorFlow.js model for value function (outputs scalar value)
-- `learnableStd`: Trainable standard deviation array for continuous actions
+- `learnableLogStd`: Trainable log standard deviation array for continuous actions (std = exp(logStd))
 - `actionSpaces`: Action space definitions (one per action index)
 
 ### TrainingSession
